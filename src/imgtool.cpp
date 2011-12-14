@@ -78,8 +78,6 @@ int g_resizeOptions = 0; //RESIZE_SHRINK_MAX; // bits defined above for resize o
 int g_resize = 0;
 char g_dispX[100]; // 1 to display hpixel, percentage granular
 char g_dispY[100]; // 1 to display vpixel (row), percentage granular
-int g_loop = 1; // Number of times to loop, 0 = infinite
-int g_outputFmt = 0; // 0 = frame buffer 0, 1 = frame buffer 1, 100 = raw, 101 = bmp
 double g_screenGamma = 2.2; // Reasonable default; a good guess for a PC monitor in a dimly lit room
 int x_pct = 100;	// x and y resize percentages
 int y_pct = 100;
@@ -226,20 +224,9 @@ typedef struct _BMPHeader {
 // Open output file in specified format
 int OpenOutput( int width, int height, bool isOutput = true )
 {
-	int openFlags = isOutput ? O_RDWR : O_RDONLY;
-	if (g_outputFmt >= 100)
-	{
-		openFlags |= (O_CREAT | O_TRUNC);
-	}
-	fprintf( stderr, "Opening %s %s fmt=%d\n", isOutput ? "output" : "input", g_fbDev, g_outputFmt );
-	int fh = open( g_fbDev, openFlags, 0644 );
-	if (fh < 0)
-	{
-		fprintf( stderr, "Error: could not open %s for %s\n", g_fbDev, isOutput ? "output" : "input" );
-		return fh;
-	}
-	fprintf( stderr, "fb handle = %d\n", fh );
-	return fh;
+	int openFlags = isOutput ? O_RDWR | O_CREAT | O_TRUNC : O_RDONLY;
+	fprintf( stderr, "Opening %s for %s\n", isOutput ? "output" : "input", g_fbDev);
+	return open( g_fbDev, openFlags, 0644 );
 }
 
 // Generic close output
@@ -1102,26 +1089,6 @@ void ShowPng( const char *file )
 			scaledWidth, scaledHeight,
 			x_pct, y_pct );
 	}
-	/**
-	if (width > 320 || height > 240)
-	{
-		int scaleWidth = 32000 / width;
-		int scaleHeight = 24000 / height;
-		// Proportional scaling
-		int scaleFactor = scaleWidth < scaleHeight ? scaleWidth : scaleHeight;
-		// Scale factor is the percentage of pixels to be displayed
-		g_resize = 1;
-		// Seed display vectors. If we wanted non-proportionate scaling we'd use separate scale factors
-		SetDisplayVector( scaleFactor, g_dispX );
-		SetDisplayVector( scaleFactor, g_dispY );
-
-		if (g_dbg)
-		{
-			DumpVector( "X vector", g_dispX );
-			DumpVector( "Y vector", g_dispY );
-		}
-	}
-	***/
 
    // Convert rows from R8G8B8 to frame buffer format
    int fb = OpenOutput( scaledWidth, scaledHeight );
@@ -1989,7 +1956,7 @@ int main( int argc, char *argv[] )
 		{
 			if (optarg)
 			{
-				g_outputFmt = fbNum = atoi( optarg );
+				fbNum = atoi( optarg );
 			}
 			else
 			{
@@ -2086,7 +2053,6 @@ int main( int argc, char *argv[] )
 	if (g_fill != 0xffffffff)
 	{
 		sprintf( g_fbDev, "/dev/fb%d", fbNum );
-		g_outputFmt = fbNum;
 		FillRGB( g_fill );
 		if (!outputFile[0])
 		{
@@ -2112,12 +2078,10 @@ int main( int argc, char *argv[] )
 	{
 		fprintf( stderr, "Writing output to %s instead of frame buffer\n", renderFile );
 		strcpy( g_fbDev, renderFile );
-		g_outputFmt = 101; // Raw output format
 	}
 	else
 	{
 		sprintf( g_fbDev, "/dev/fb%d", fbNum );
-		g_outputFmt = fbNum;
 	}
 	if (!strcmp( outputFile, "-" ))
 	{
