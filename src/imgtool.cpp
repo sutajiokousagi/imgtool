@@ -71,10 +71,6 @@ extern "C" {
 #define Y_STRETCH		0x02
 #define	X_SHRINK		0x04	// Shrinking X
 #define Y_SHRINK		0x08
-char g_dispX[100]; // 1 to display hpixel, percentage granular
-char g_dispY[100]; // 1 to display vpixel (row), percentage granular
-int x_size = DEFAULT_WIDTH;
-int y_size = DEFAULT_HEIGHT;
 enum eBitFormats {
 	BF_RGB565,
 	BF_RGB888,
@@ -94,14 +90,19 @@ struct imgtool_conf {
 	char output[256];
 	double gamma;
 	enum eBitFormats fmt;
+	unsigned int width, height;
 
 	int debug_level;
 
 	/* Resizing parameters */
 	int x_pct;
 	int y_pct;
-	int resize_options;
+	unsigned int resize_options;
 	int resize;
+
+	/* I have no idea what these are for */
+	char disp_x[100];
+	char disp_y[100];
 
 	/* JPEG settings */
 	int jpeg_quality;
@@ -114,7 +115,7 @@ struct imgtool_conf {
 	unsigned int fill_color;
 };
 
-static inline int BytesPerFBPixel(enum eBitFormats fmt)
+static inline unsigned int BytesPerFBPixel(enum eBitFormats fmt)
 {
 	switch (fmt)
 	{
@@ -239,7 +240,7 @@ void CloseFB( int fb_handle )
 
 // Generic write to frame buffer.
 // Returns bytes written
-int WriteFB( int fb_handle, void *data, int length )
+static int WriteFB( int fb_handle, void *data, int length )
 {
 	unsigned char *_data = (unsigned char *)data;
 	return write( fb_handle, _data, length );
@@ -298,7 +299,7 @@ void DumpVector( const char *label, char *v )
 }
 
 // Adjust output size and width based on resize flags. true if resizing
-bool AdjustOutputSize( int& width, int& height, struct imgtool_conf *conf )
+bool AdjustOutputSize( unsigned int& width, unsigned int& height, struct imgtool_conf *conf )
 {
 	conf->x_pct = 100;
 	conf->y_pct = 100;
@@ -312,32 +313,32 @@ bool AdjustOutputSize( int& width, int& height, struct imgtool_conf *conf )
 	{
 		return false;
 	}
-	if ((RESIZE_SHRINK_X & conf->resize_options) && width > x_size)
+	if ((RESIZE_SHRINK_X & conf->resize_options) && width > conf->width)
 	{
-		conf->x_pct = (x_size*100L / ((unsigned long)width));
-		width = x_size;
+		conf->x_pct = (conf->width*100L / ((unsigned long)width));
+		width = conf->width;
 	}
-	if ((RESIZE_SHRINK_Y & conf->resize_options) && height > y_size)
+	if ((RESIZE_SHRINK_Y & conf->resize_options) && height > conf->height)
 	{
-		conf->y_pct = (y_size*100L / ((unsigned long)height));
-		height = y_size;
+		conf->y_pct = (conf->height*100L / ((unsigned long)height));
+		height = conf->height;
 	}
-	if ((RESIZE_SHRINK_MAX & conf->resize_options) && (width > x_size || height > y_size))
+	if ((RESIZE_SHRINK_MAX & conf->resize_options) && (width > conf->width || height > conf->height))
 	{
-		conf->x_pct = (x_size*100L / ((unsigned long)width));
-		conf->y_pct = (y_size*100L / ((unsigned long)height));
+		conf->x_pct = (conf->width*100L / ((unsigned long)width));
+		conf->y_pct = (conf->height*100L / ((unsigned long)height));
 		if (conf->y_pct < conf->x_pct)
 		{
-			height = y_size;
-			width = (x_size*100L * width) / 100L;
+			height = conf->height;
+			width = (conf->width*100L * width) / 100L;
 		}
 		else
 		{
-			if (width > x_size)
+			if (width > conf->width)
 			{
-				width = x_size;
+				width = conf->width;
 			}
-			height = (y_size*100L * height) / 100L;
+			height = (conf->height*100L * height) / 100L;
 		}
 
 	}
@@ -346,12 +347,12 @@ bool AdjustOutputSize( int& width, int& height, struct imgtool_conf *conf )
 	if (conf->y_pct < 100) conf->resize |= Y_SHRINK;
 	if (conf->y_pct > 100) conf->resize |= Y_STRETCH;
 	// Seed display vectors. If we wanted non-proportionate scaling we'd use separate scale factors
-	SetDisplayVector( conf->x_pct, g_dispX );
-	SetDisplayVector( conf->y_pct, g_dispY );
+	SetDisplayVector( conf->x_pct, conf->disp_x );
+	SetDisplayVector( conf->y_pct, conf->disp_y );
 	if (conf->debug_level)
 	{
-		if (conf->x_pct!=100) DumpVector( "X vector", g_dispX );
-		if (conf->y_pct!=100) DumpVector( "Y vector", g_dispY );
+		if (conf->x_pct!=100) DumpVector( "X vector", conf->disp_x );
+		if (conf->y_pct!=100) DumpVector( "Y vector", conf->disp_y );
 	}
 	return (conf->resize != 0);
 }
@@ -405,7 +406,7 @@ row_callback(png_structp png_ptr, png_bytep new_row,
  * shown below:
  */
    /* Check if row_num is in bounds. */
-   if((row_num >= 0) && (row_num < height) && row_num < y_size)
+   if((row_num >= 0) && (row_num < height) && row_num < conf->height)
    {
      /* Get pointer to corresponding row in our
       * PNG read buffer.
@@ -465,20 +466,20 @@ void user_warning_fn(png_structp png_ptr,
 
 #endif
 
-void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
+void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R5G6B5 or B5G6R5
 	int bytes_per_pixel = 4;
 	// Fill to end of row
-	memset( dest, 0, BytesPerFBPixel(conf->fmt)*x_size );
+	memset( dest, 0, BytesPerFBPixel(conf->fmt)*conf->width );
 	int nStart = 0;
 	// Check for clipping required
-	if (nColumns > x_size && conf->resize == 0)
+	if (nColumns > conf->width && conf->resize == 0)
 	{
-		nColumns = x_size;
+		nColumns = conf->width;
 	}
-	int col, dcol;
+	unsigned int col, dcol;
 	int ri = 2, gi = 1, bi = 0;
 	if (conf->fmt == BF_BGR565)
 	{
@@ -487,10 +488,10 @@ void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, unsigned 
 		bi = 2;
 	}
 	src += (bytes_per_pixel * nStart);
-	for (col = nStart, dcol = 0; dcol < x_size && col < nColumns; col++)
+	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++)
 	{
 		// Check horizontal display vector if resizing
-		if ((conf->resize & X_SHRINK) == 0 || g_dispX[col%100])
+		if ((conf->resize & X_SHRINK) == 0 || conf->disp_x[col%100])
 		{
 			// src: rrrrrrrr gggggggg bbbbbbbb aaaaaaaa
 			// dst: rrrrrggg gggbbbbb
@@ -509,7 +510,7 @@ void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, unsigned 
 				b = 0xff >> 3;
 			}
 			***********/
-			int pixIndex = conf->mirror_h ? 2 * (x_size - dcol) : 2 * dcol;
+			int pixIndex = conf->mirror_h ? 2 * (conf->width - dcol) : 2 * dcol;
 			// hg - not sure why these appear to be in little-endian order?
 			dest[pixIndex + 1] = (r << 3) | (g >> 3);
 			dest[pixIndex + 0] = (g << 5) | b;
@@ -521,25 +522,25 @@ void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, unsigned 
 }
 
 // line copy for rgb888
-void ARGB8888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
+void ARGB8888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R8G8B8
 	int bytes_per_pixel = 4;
 	// Fill to end of row
-	memset( dest, 0, 3*x_size );
+	memset( dest, 0, 3*conf->width );
 	int nStart = 0;
 	// Check for clipping required
-	if (nColumns > x_size && conf->resize == 0)
+	if (nColumns > conf->width && conf->resize == 0)
 	{
-		nColumns = x_size;
+		nColumns = conf->width;
 	}
-	int col, dcol;
+	unsigned int col, dcol;
 	src += (bytes_per_pixel * nStart);
-	for (col = nStart, dcol = 0; dcol < x_size && col < nColumns; col++)
+	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++)
 	{
 		// Check horizontal display vector if resizing
-		if ((conf->resize & X_SHRINK) == 0 || g_dispX[col%100])
+		if ((conf->resize & X_SHRINK) == 0 || conf->disp_x[col%100])
 		{
 			// src: rrrrrrrr gggggggg bbbbbbbb aaaaaaaa
 			// dst: rrrrrrrr gggggggg bbbbbbbb
@@ -547,7 +548,7 @@ void ARGB8888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned 
 			r = src[2];
 			g = src[1];
 			b = src[0];
-			int pixIndex = conf->mirror_h ? 3 * (x_size - dcol) : 3 * dcol;
+			int pixIndex = conf->mirror_h ? 3 * (conf->width - dcol) : 3 * dcol;
 			dest[pixIndex + 2] = b;
 			dest[pixIndex + 1] = g;
 			dest[pixIndex + 0] = r;
@@ -559,25 +560,25 @@ void ARGB8888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned 
 }
 
 // line copy for argb888
-void ARGB8888toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
+void ARGB8888toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in A8R8G8B8
 	// Destination is in A8R8G8B8
 	int bytes_per_pixel = 4;
 	// Fill to end of row
-	memset( dest, 0, 4*x_size );
+	memset( dest, 0, 4*conf->width );
 	int nStart = 0;
 	// Check for clipping required
-	if (nColumns > x_size && conf->resize == 0)
+	if (nColumns > conf->width && conf->resize == 0)
 	{
-		nColumns = x_size;
+		nColumns = conf->width;
 	}
-	int col, dcol;
+	unsigned int col, dcol;
 	src += (bytes_per_pixel * nStart);
-	for (col = nStart, dcol = 0; dcol < x_size && col < nColumns; col++)
+	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++)
 	{
 		// Check horizontal display vector if resizing
-		if ((conf->resize & X_SHRINK) == 0 || g_dispX[col%100])
+		if ((conf->resize & X_SHRINK) == 0 || conf->disp_x[col%100])
 		{
 			// src: rrrrrrrr gggggggg bbbbbbbb aaaaaaaa
 			// dst: rrrrrrrr gggggggg bbbbbbbb aaaaaaaa
@@ -612,20 +613,20 @@ void ARGB8888toFB( struct imgtool_conf *conf, unsigned char *dest, unsigned cons
 }
 
 #ifndef NO_PNG
-void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
+void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns, int nPalette, png_colorp pal )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R5G6B5
 	int bytes_per_pixel = nPalette > 0 ? 1 : 3;
 	// Fill to end of row
-	memset( dest, 0, BytesPerFBPixel(conf->fmt)*x_size );
+	memset( dest, 0, BytesPerFBPixel(conf->fmt)*conf->width );
 	int nStart = 0;
 	// Check for clipping required
-	if (nColumns > x_size && conf->resize == 0)
+	if (nColumns > conf->width && conf->resize == 0)
 	{
-		nColumns = x_size;
+		nColumns = conf->width;
 	}
-	int col, dcol;
+	unsigned int col, dcol;
 	src += (bytes_per_pixel * nStart);
 	unsigned char r, g, b;
 	unsigned char *high = &r;
@@ -640,10 +641,10 @@ void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsigned cons
 		dest_hi = 0;
 		dest_lo = 1;
 	}
-	for (col = nStart, dcol = 0; dcol < x_size && col < nColumns; col++)
+	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++)
 	{
 		// Check horizontal display vector if resizing
-		if ((conf->resize & X_SHRINK) == 0 || g_dispX[col%100])
+		if ((conf->resize & X_SHRINK) == 0 || conf->disp_x[col%100])
 		{
 			// src: rrrrrrrr gggggggg bbbbbbbb aaaaaaaa
 			// dst: rrrrrggg gggbbbbb
@@ -661,7 +662,7 @@ void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsigned cons
 				b = src[2] >> 3;
 			}
 			// hg - not sure why these appear to be in little-endian order?
-			int pixIndex = conf->mirror_h ? 2 * (x_size - dcol) : dcol * 2;
+			int pixIndex = conf->mirror_h ? 2 * (conf->width - dcol) : dcol * 2;
 			dest[pixIndex + dest_hi] = (*high << 3) | (*mid >> 3);
 			dest[pixIndex + dest_lo] = (*mid << 5) | *low;
 			dcol++;
@@ -671,25 +672,25 @@ void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsigned cons
 	}
 }
 
-void RGB8toR8G8B8( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
+void RGB8toR8G8B8( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns, int nPalette, png_colorp pal )
 {
 	// Source is in R8G8B8 (alpha should be stripped) or indexed
 	// Destination is in R8G8B8
 	int bytes_per_pixel = nPalette > 0 ? 1 : 3;
 	// Fill to end of row
-	memset( dest, 0, BytesPerFBPixel(conf->fmt)*x_size );
+	memset( dest, 0, BytesPerFBPixel(conf->fmt)*conf->width );
 	int nStart = 0;
 	// Check for clipping required
-	if (nColumns > x_size && conf->resize == 0)
+	if (nColumns > conf->width && conf->resize == 0)
 	{
-		nColumns = x_size;
+		nColumns = conf->width;
 	}
-	int col, dcol;
+	unsigned int col, dcol;
 	src += (bytes_per_pixel * nStart);
-	for (col = nStart, dcol = 0; dcol < x_size && col < nColumns; col++)
+	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++)
 	{
 		// Check horizontal display vector if resizing
-		if ((conf->resize & X_SHRINK) == 0 || g_dispX[col%100])
+		if ((conf->resize & X_SHRINK) == 0 || conf->disp_x[col%100])
 		{
 			// src: rrrrrrrr gggggggg bbbbbbbb aaaaaaaa
 			// dst: rrrrrrrr gggggggg bbbbbbbb
@@ -707,7 +708,7 @@ void RGB8toR8G8B8( struct imgtool_conf *conf, unsigned char *dest, unsigned cons
 				g = src[1];
 				b = src[2];
 			}
-			int pixIndex = conf->mirror_h ? 3 * (x_size - dcol) : dcol * 3;
+			int pixIndex = conf->mirror_h ? 3 * (conf->width - dcol) : dcol * 3;
 			dest[pixIndex + 2] = r;
 			dest[pixIndex + 1] = g;
 			dest[pixIndex + 0] = b;
@@ -718,25 +719,25 @@ void RGB8toR8G8B8( struct imgtool_conf *conf, unsigned char *dest, unsigned cons
 	}
 }
 
-void RGB8toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
+void RGB8toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int unsigned nColumns, int nPalette, png_colorp pal )
 {
 	// Source is in R8G8B8 (alpha should be stripped) or indexed
 	// Destination is in R8G8B8
 	int bytes_per_pixel = nPalette > 0 ? 1 : 3;
 	// Fill to end of row
-	memset( dest, 0, BytesPerFBPixel(conf->fmt)*x_size );
+	memset( dest, 0, BytesPerFBPixel(conf->fmt)*conf->width );
 	int nStart = 0;
 	// Check for clipping required
-	if (nColumns > x_size && conf->resize == 0)
+	if (nColumns > conf->width && conf->resize == 0)
 	{
-		nColumns = x_size;
+		nColumns = conf->width;
 	}
-	int col, dcol;
+	unsigned int col, dcol;
 	src += (bytes_per_pixel * nStart);
-	for (col = nStart, dcol = 0; dcol < x_size && col < nColumns; col++)
+	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++)
 	{
 		// Check horizontal display vector if resizing
-		if ((conf->resize & X_SHRINK) == 0 || g_dispX[col%100])
+		if ((conf->resize & X_SHRINK) == 0 || conf->disp_x[col%100])
 		{
 			// src: rrrrrrrr gggggggg bbbbbbbb aaaaaaaa
 			// dst: rrrrrrrr gggggggg bbbbbbbb
@@ -756,7 +757,7 @@ void RGB8toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned co
 				b = src[2];
 				a = src[3];
 			}
-			int pixIndex = conf->mirror_h ? 4 * (x_size - dcol) : dcol * 4;
+			int pixIndex = conf->mirror_h ? 4 * (conf->width - dcol) : dcol * 4;
 			dest[pixIndex + 3] = a;
 			dest[pixIndex + 2] = r;
 			dest[pixIndex + 1] = g;
@@ -791,22 +792,22 @@ void RGB8toFBPng( struct imgtool_conf *conf, unsigned char *dest, unsigned const
 #endif
 
 // Get a single pixel row capture from the frame buffer and convert to RGB888
-void RGB565toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
+void RGB565toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in R5G6B5 (alpha should be stripped)
 	// Destination is in R8G8B8
 	int bytes_per_pixel = 3;
 	// Fill to end of row
-	memset( dest, 0, bytes_per_pixel*x_size );
+	memset( dest, 0, bytes_per_pixel*conf->width );
 	int nStart = 0;
 	// Check for clipping required
-	if (nColumns > x_size)
+	if (nColumns > conf->width)
 	{
-		nColumns = x_size;
+		nColumns = conf->width;
 	}
-	int col, dcol;
+	unsigned int col, dcol;
 	src += (bytes_per_pixel * nStart);
-	for (col = nStart, dcol = 0; dcol < x_size && col < nColumns; col++)
+	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++)
 	{
 		// src: rrrrrggg gggbbbbb
 		// dst: rrrrrrrr gggggggg bbbbbbbb
@@ -828,22 +829,22 @@ void RGB565toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned co
 }
 
 // Get a single pixel row capture from the frame buffer and convert to RGB888
-void RGB888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
+void RGB888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R8G8B8
 	int bytes_per_pixel = 3;
 	// Fill to end of row
-	memset( dest, 0, bytes_per_pixel*x_size );
+	memset( dest, 0, bytes_per_pixel*conf->width );
 	int nStart = 0;
 	// Check for clipping required
-	if (nColumns > x_size)
+	if (nColumns > conf->width)
 	{
-		nColumns = x_size;
+		nColumns = conf->width;
 	}
-	int col, dcol;
+	unsigned int col, dcol;
 	src += (bytes_per_pixel * nStart);
-	for (col = nStart, dcol = 0; dcol < x_size && col < nColumns; col++)
+	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++)
 	{
 		// src: rrrrrrrr gggggggg bbbbbbbb
 		// dst: rrrrrrrr gggggggg bbbbbbbb
@@ -1078,7 +1079,7 @@ void ShowPng(struct imgtool_conf *conf)
    png_read_image(png_ptr, row_pointers);
 
 	// Determine resizing
-	int scaledWidth, scaledHeight;
+	unsigned int scaledWidth, scaledHeight;
 	scaledWidth = width;
 	scaledHeight = height;
 	if (AdjustOutputSize( scaledWidth, scaledHeight, conf))
@@ -1093,7 +1094,7 @@ void ShowPng(struct imgtool_conf *conf)
    int fb = OpenOutput( scaledWidth, scaledHeight, conf->output );
    if (fb > 0)
    {
-		unsigned char *fbRow = (unsigned char *)alloca( BytesPerFBPixel(conf->fmt)*x_size );
+		unsigned char *fbRow = (unsigned char *)alloca( BytesPerFBPixel(conf->fmt)*conf->width );
 		if (!fbRow)
 		{
 			fprintf( stderr, "malloc() failed, errno=%d (%s)\n", errno, strerror(errno) );
@@ -1107,17 +1108,17 @@ void ShowPng(struct imgtool_conf *conf)
 			// Clip oversized rows
 			if (maxRow < height-1)
 			{
-				minRow = height-y_size;
+				minRow = height-conf->height;
 			}
 		}
-		int dispRow = minRow;
+		unsigned int dispRow = minRow;
 		// Fill empty space
-		if (maxRow - minRow < y_size-1)
+		if (maxRow - minRow < conf->height-1)
 		{
-			fillRows = y_size - 1 - maxRow - minRow;
+			fillRows = conf->height - 1 - maxRow - minRow;
 		}
 		fprintf( stderr, "Displaying rows from %d to %d inclusive\n", (int)minRow, (int)maxRow );
-		for (row = minRow; row<=maxRow && dispRow < y_size; row++)
+		for (row = minRow; row<=maxRow && dispRow < conf->height; row++)
 		{
 			if (false)
 			{
@@ -1139,7 +1140,7 @@ void ShowPng(struct imgtool_conf *conf)
 			if (conf->resize & Y_SHRINK)
 			{
 				// Determine rows to skip
-				if (g_dispY[row%100] == 0)
+				if (conf->disp_y[row%100] == 0)
 				{
 					// Skip this one
 					continue;
@@ -1147,7 +1148,7 @@ void ShowPng(struct imgtool_conf *conf)
 			}
 
 			RGB8toFBPng( conf, fbRow, row_pointers[row], width, num_palette, palette );
-			WriteFB( fb, fbRow, BytesPerFBPixel(conf->fmt) * x_size );
+			WriteFB( fb, fbRow, BytesPerFBPixel(conf->fmt) * conf->width );
 			dispRow++;
 			if (conf->debug_level && dispRow <= 10)
 			{
@@ -1155,14 +1156,14 @@ void ShowPng(struct imgtool_conf *conf)
 				HexDump( row, "r5g6b5", fbRow, width*2 );
 			}
 		}
-		memset( fbRow, 0, BytesPerFBPixel(conf->fmt) * x_size );
-		if (dispRow < y_size-1)
+		memset( fbRow, 0, BytesPerFBPixel(conf->fmt) * conf->width );
+		if (dispRow < conf->height-1)
 		{
-			fillRows = y_size - dispRow;
+			fillRows = conf->height - dispRow;
 		}
 		for (row = 0; row < fillRows; row++)
 		{
-			WriteFB( fb, fbRow, BytesPerFBPixel(conf->fmt) * x_size );
+			WriteFB( fb, fbRow, BytesPerFBPixel(conf->fmt) * conf->width );
 		}
 		fprintf( stderr, "Closing frame buffer\n" );
 		CloseFB( fb );
@@ -1361,7 +1362,7 @@ void ShowJpeg(struct imgtool_conf *conf)
 	buffer_height = 1;
 
 	// Determine resizing
-	int scaledWidth, scaledHeight;
+	unsigned int scaledWidth, scaledHeight;
 	scaledWidth = cinfo.output_width;
 	scaledHeight = cinfo.output_height;
 	if (AdjustOutputSize( scaledWidth, scaledHeight, conf))
@@ -1382,31 +1383,31 @@ void ShowJpeg(struct imgtool_conf *conf)
    int fb = OpenOutput( scaledWidth, scaledHeight, conf->output );
    if (fb > 0)
    {
-		unsigned char *fbRow = (unsigned char *)malloc(BytesPerFBPixel(conf->fmt)*x_size);
+		unsigned char *fbRow = (unsigned char *)malloc(BytesPerFBPixel(conf->fmt)*conf->width);
 		if (!fbRow)
 		{
 			fprintf( stderr, "malloc() failed errno=%d (%s)\n", errno, strerror(errno) );
 			exit( 1 );
 		}
-		int maxRow = cinfo.output_height-1;
-		int minRow = 0;
+		unsigned int maxRow = cinfo.output_height-1;
+		unsigned int minRow = 0;
 		int fillRows = 0;
 		if (!conf->resize)
 		{
 			// Clip oversized rows
 			if (maxRow < cinfo.output_height-1)
 			{
-				minRow = cinfo.output_height-y_size;
+				minRow = cinfo.output_height-conf->height;
 			}
 		}
-		int dispRow = minRow;
+		unsigned int dispRow = minRow;
 		// Fill empty space
-		if (maxRow - minRow < y_size-1)
+		if (maxRow - minRow < conf->height-1)
 		{
-			fillRows = y_size - 1 - maxRow - minRow;
+			fillRows = conf->height - 1 - maxRow - minRow;
 		}
 		fprintf( stderr, "Displaying rows from %d to %d inclusive\n", minRow, maxRow );
-		int row = minRow;
+		unsigned int row = minRow;
 
 		/* Process data */
 		while (cinfo.output_scanline < cinfo.output_height)
@@ -1414,14 +1415,14 @@ void ShowJpeg(struct imgtool_conf *conf)
 			num_scanlines = jpeg_read_scanlines(&cinfo, buffer,
 						buffer_height);
 			row = cinfo.output_scanline;
-			if (row >= minRow && row<=maxRow && dispRow < y_size)
+			if (row >= minRow && row<=maxRow && dispRow < conf->height)
 			{
 				//(*dest_mgr->put_pixel_rows) (&cinfo, dest_mgr, num_scanlines);
 				// If resizing, determine whether we skip this one
 				if (conf->resize & Y_SHRINK)
 				{
 					// Determine rows to skip
-					if (g_dispY[row%100] == 0)
+					if (conf->disp_y[row%100] == 0)
 					{
 						// Skip this one
 						continue;
@@ -1429,7 +1430,7 @@ void ShowJpeg(struct imgtool_conf *conf)
 				}
 
 				RGB8toFBPng( conf, fbRow, buffer[0], cinfo.output_width, 0, NULL );
-				WriteFB( fb, fbRow, BytesPerFBPixel(conf->fmt) * x_size );
+				WriteFB( fb, fbRow, BytesPerFBPixel(conf->fmt) * conf->width );
 				dispRow++;
 				if (conf->debug_level && dispRow <= 10)
 				{
@@ -1522,10 +1523,10 @@ int ShowBmp(struct imgtool_conf *conf)
 	}
 	/*****
 	 * Allow display of  smaller bmp left justified
-	if (bmp_width != x_size || bmp_height != y_size)
+	if (bmp_width != conf->width || bmp_height != conf->height)
 	{
 		fprintf( stderr, "bmp size is %dX%d - must match specified frame buffer size %dX%d\n",
-			bmp_width, bmp_height, x_size, y_size );
+			bmp_width, bmp_height, conf->width, conf->height );
 		goto exit_close_input;
 	}
 	 *
@@ -1538,7 +1539,7 @@ int ShowBmp(struct imgtool_conf *conf)
 	}
 
 	// Now open output
-	hOutput = OpenOutput( x_size, y_size, conf->output, true );
+	hOutput = OpenOutput( conf->width, conf->height, conf->output, true );
 	if (hOutput < 0)
 	{
 		fprintf( stderr, "Error: failed to open %s (errno=%d)\n", conf->output, errno );
@@ -1553,10 +1554,10 @@ int ShowBmp(struct imgtool_conf *conf)
 		fprintf( stderr, "Malloc failed for %d bytes\n", bytes_per_pixel * bmp_width * bmp_height );
 		goto exit_close_input;
 	}
-	output_buff = (unsigned char*)malloc( BytesPerFBPixel(conf->fmt) * x_size );
+	output_buff = (unsigned char*)malloc( BytesPerFBPixel(conf->fmt) * conf->width );
 	if (output_buff == NULL)
 	{
-		fprintf( stderr, "malloc failed for %d bytes\n", BytesPerFBPixel(conf->fmt) * x_size );
+		fprintf( stderr, "malloc failed for %d bytes\n", BytesPerFBPixel(conf->fmt) * conf->width );
 		goto exit_free_input_buff;
 	}
 
@@ -1571,10 +1572,10 @@ int ShowBmp(struct imgtool_conf *conf)
 	{
 		// Fix up bits per pixel, size of image, and file size
 		bh.infoHeader.SetBitsPerPixel( 8 * BytesPerFBPixel(conf->fmt) );
-		bh.infoHeader.SetImageDataLength( x_size * y_size * BytesPerFBPixel(conf->fmt) );
-		bh.fileHeader.SetFilesize( bh.fileHeader.GetImageDataOffset() + x_size * y_size * BytesPerFBPixel(conf->fmt) );
+		bh.infoHeader.SetImageDataLength( conf->width * conf->height * BytesPerFBPixel(conf->fmt) );
+		bh.fileHeader.SetFilesize( bh.fileHeader.GetImageDataOffset() + conf->width * conf->height * BytesPerFBPixel(conf->fmt) );
 		// Write same size header
-		if (WriteFB( hOutput, &bh, bh.fileHeader.GetImageDataOffset() ) != bh.fileHeader.GetImageDataOffset())
+		if (WriteFB( hOutput, &bh, bh.fileHeader.GetImageDataOffset() ) != (int)bh.fileHeader.GetImageDataOffset())
 		{
 			fprintf( stderr, "bmp header write failed, errno=%d (%s)\n", errno, strerror(errno) );
 			goto exit_free_output_buff;
@@ -1582,7 +1583,7 @@ int ShowBmp(struct imgtool_conf *conf)
 	}
 
 	// FIXME use g_fill
-	memset( output_buff, 0, bytes_per_pixel * x_size );
+	memset( output_buff, 0, bytes_per_pixel * conf->width );
 	for (row = 0; row < bmp_height; row++)
 	{
 		// If bmp mode, we're not flipping
@@ -1590,7 +1591,7 @@ int ShowBmp(struct imgtool_conf *conf)
 		int bmpyRow = row;
 		if (!conf->bmp_mode)
 		{
-			yRow = y_size - row - 1;
+			yRow = conf->height - row - 1;
 			bmpyRow = bmp_height - row - 1;
 		}
 		// Kluge for rgb565 bmp files
@@ -1602,9 +1603,9 @@ int ShowBmp(struct imgtool_conf *conf)
 		{
 			ARGB8888toFB( conf, output_buff, &input_buff[bmpyRow*bmp_width*bytes_per_pixel], bmp_width );
 		}
-		if (WriteFB( hOutput, output_buff, BytesPerFBPixel(conf->fmt) * x_size ) != BytesPerFBPixel(conf->fmt) * x_size)
+		if (WriteFB( hOutput, output_buff, BytesPerFBPixel(conf->fmt) * conf->width ) != (int)(BytesPerFBPixel(conf->fmt) * conf->width))
 		{
-			fprintf( stderr, "write failed for %d bytes at row %d\n", BytesPerFBPixel(conf->fmt) * x_size, row );
+			fprintf( stderr, "write failed for %d bytes at row %d\n", BytesPerFBPixel(conf->fmt) * conf->width, row );
 			goto exit_free_output_buff;
 		}
 	}
@@ -1663,14 +1664,14 @@ void CaptureJpeg(struct imgtool_conf *conf)
 	/* Allocate one-row buffer for returned data */
 	buffer = (cinfo.mem->alloc_sarray)
 	((j_common_ptr) &cinfo, JPOOL_IMAGE,
-	 (JDIMENSION) (x_size * 3), (JDIMENSION) 1);
+	 (JDIMENSION) (conf->width * 3), (JDIMENSION) 1);
 	buffer_height = 1;
 
 	cinfo.in_color_space = JCS_RGB;
 	cinfo.input_components = 3;
 	cinfo.data_precision = 8; // bits per RGB component
-	cinfo.image_width = (JDIMENSION) x_size;
-	cinfo.image_height = (JDIMENSION) y_size;
+	cinfo.image_width = (JDIMENSION) conf->width;
+	cinfo.image_height = (JDIMENSION) conf->height;
 
 	/* Input colorspace has been set (always RGB) - fix colorspace-dependent defaults */
 	jpeg_default_colorspace(&cinfo);
@@ -1689,7 +1690,7 @@ void CaptureJpeg(struct imgtool_conf *conf)
 	int fb = OpenOutput( cinfo.image_width, cinfo.image_height, conf->output, false );
 	if (fb > 0)
 	{
-		unsigned char *fbRow = (unsigned char *)malloc(BytesPerFBPixel(conf->fmt)*x_size);
+		unsigned char *fbRow = (unsigned char *)malloc(BytesPerFBPixel(conf->fmt)*conf->width);
 		if (!fbRow)
 		{
 			fprintf( stderr, "malloc failed error %d (%s)\n", errno, strerror(errno) );
@@ -1702,7 +1703,7 @@ void CaptureJpeg(struct imgtool_conf *conf)
 		while (cinfo.next_scanline < cinfo.image_height && errCount == 0) {
 			num_scanlines = buffer_height;
 			// Get a row from frame buffer in native format
-			if (read( fb, fbRow, BytesPerFBPixel(conf->fmt) * x_size ) < BytesPerFBPixel(conf->fmt) * x_size)
+			if (read( fb, fbRow, BytesPerFBPixel(conf->fmt) * conf->width ) < (int)(BytesPerFBPixel(conf->fmt) * conf->width))
 			{
 				fprintf( stderr, "Error: failed reading row %d from frame buffer\n", cinfo.next_scanline );
 				errCount++;
@@ -1763,13 +1764,13 @@ int FillRGB(struct imgtool_conf *conf)
 	int hOutput = -1;
 	int bpp;
 	int bytes_per_pixel;
-	int row, col;
+	unsigned int row, col;
 	unsigned char *input_buff;
 	unsigned char *output_buff;
 	char *scr;
 
 	// Now open output
-	hOutput = OpenOutput( x_size, y_size, conf->output, true );
+	hOutput = OpenOutput( conf->width, conf->height, conf->output, true );
 	if (hOutput < 0)
 	{
 		fprintf( stderr, "Error: failed to open %s (errno=%d)\n", conf->output, errno );
@@ -1779,48 +1780,48 @@ int FillRGB(struct imgtool_conf *conf)
 	// Allocate input and output buffers
 	bpp = 32;
 	bytes_per_pixel = bpp / 8;
-	input_buff = (unsigned char*)malloc( bytes_per_pixel * x_size );
+	input_buff = (unsigned char*)malloc( bytes_per_pixel * conf->width );
 	if (input_buff == NULL)
 	{
-		fprintf( stderr, "Malloc failed for %d bytes\n", bytes_per_pixel * x_size );
+		fprintf( stderr, "Malloc failed for %d bytes\n", bytes_per_pixel * conf->width );
 		goto exit_close_input;
 	}
-	output_buff = (unsigned char*)malloc( BytesPerFBPixel(conf->fmt) * x_size );
+	output_buff = (unsigned char*)malloc( BytesPerFBPixel(conf->fmt) * conf->width );
 	if (output_buff == NULL)
 	{
-		fprintf( stderr, "malloc failed for %d bytes\n", 2 * x_size );
+		fprintf( stderr, "malloc failed for %d bytes\n", 2 * conf->width );
 		goto exit_free_input_buff;
 	}
 
 	// Set up input buffer
-	for (col = 0; col < x_size; col++)
+	for (col = 0; col < conf->width; col++)
 	{
 		((unsigned int*)input_buff)[col] = (conf->fill_color<<0);
 	}
 	// Convert to frame buffer
-	ARGB8888toFB( conf, output_buff, input_buff, x_size );
+	ARGB8888toFB( conf, output_buff, input_buff, conf->width );
 	// Dump in hex for 8 columns
 	//HexDump( 0, "Fill pattern", output_buff, 4 * 8 );
 
-	scr = (char *) mmap(0, x_size * y_size * BytesPerFBPixel(conf->fmt),
+	scr = (char *) mmap(0, conf->width * conf->height * BytesPerFBPixel(conf->fmt),
 				PROT_READ | PROT_WRITE, MAP_SHARED, hOutput, 0);
 	if(scr != (char *)-1) {
 		char *current_row = scr;
-		for (row = 0; row < y_size; row++)
+		for (row = 0; row < conf->height; row++)
 		{
-			memcpy(current_row, output_buff, BytesPerFBPixel(conf->fmt)*x_size);
-			current_row += BytesPerFBPixel(conf->fmt)*x_size;
+			memcpy(current_row, output_buff, BytesPerFBPixel(conf->fmt)*conf->width);
+			current_row += BytesPerFBPixel(conf->fmt)*conf->width;
 		}
-		munmap(scr, x_size * y_size * BytesPerFBPixel(conf->fmt));
+		munmap(scr, conf->width * conf->height * BytesPerFBPixel(conf->fmt));
 	}
 	else {
 		perror("Unable to mmap framebuffer");
 
-		for (row = 0; row < y_size; row++)
+		for (row = 0; row < conf->height; row++)
 		{
-			if (WriteFB( hOutput, output_buff, BytesPerFBPixel(conf->fmt) * x_size ) != BytesPerFBPixel(conf->fmt) * x_size)
+			if (WriteFB( hOutput, output_buff, BytesPerFBPixel(conf->fmt) * conf->width ) != ((int)(BytesPerFBPixel(conf->fmt) * conf->width)))
 			{
-				fprintf( stderr, "write failed for %d bytes at row %d\n", BytesPerFBPixel(conf->fmt) * x_size, row );
+				fprintf( stderr, "write failed for %d bytes at row %d\n", BytesPerFBPixel(conf->fmt) * conf->width, row );
 				goto exit_free_output_buff;
 			}
 		}
@@ -1837,16 +1838,6 @@ exit_close_input:
 	return ret;
 }
 
-
-void
-SetDefault( int& value, const char *envName )
-{
-	const char *envValue = getenv( envName );
-	if (envValue)
-	{
-		value = atoi( envValue );
-	}
-}
 
 const char *imgHelpText = "[options] file\n\
 	where file is output (mode=cap) or - to write to stdout, or\n\
@@ -1901,8 +1892,6 @@ int main( int argc, char *argv[] )
 	conf.y_pct = 100;
 
 	// Get default width and height from environment
-	SetDefault( x_size, "SCREEN_X_RES" );
-	SetDefault( y_size, "SCREEN_Y_RES" );
 	for (n = 1; n < argc; n++)
 	{
 		if (argv[n][0] != '-' || !strcmp(argv[n],"-"))
@@ -2007,11 +1996,11 @@ int main( int argc, char *argv[] )
 		}
 		else if (!strncmp( option, "width", optionLength ) && optarg)
 		{
-			x_size = atoi( optarg );
+			conf.width = atoi( optarg );
 		}
 		else if (!strncmp( option, "height", optionLength ) && optarg)
 		{
-			y_size = atoi( optarg );
+			conf.height = atoi( optarg );
 		}
 		else if (!strncmp( option, "bmpmode", optionLength ) && optarg)
 		{
@@ -2052,7 +2041,7 @@ int main( int argc, char *argv[] )
 		else if (!strncmp( option, "help", optionLength ))
 		{
 			fprintf( stderr, "Syntax:\n%s ", argv[0] );
-			fprintf( stderr, imgHelpText, x_size, y_size, bfNames[conf.fmt] );
+			fprintf( stderr, imgHelpText, conf.width, conf.height, bfNames[conf.fmt] );
 			return 0;
 		}
 		else
@@ -2081,7 +2070,7 @@ int main( int argc, char *argv[] )
 	if (errMsg)
 	{
 		fprintf( stderr, "%s\nSyntax: %s ", errMsg, argv[0] );
-		fprintf( stderr, imgHelpText, x_size, y_size );
+		fprintf( stderr, imgHelpText, conf.width, conf.height );
 		return -1;
 	}
 	// Create render file if not specified
