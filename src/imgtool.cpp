@@ -39,7 +39,6 @@ extern "C" {
 #define CNPLATFORM "__CNPLATFORM_undefined__"
 #endif
 
-#undef FBWRITE_USES_MMAP
 
 #if defined( CNPLATFORM_stormwind ) || defined( CNPLATFORM_silvermoon )
 // These are defaults in case SCREEN_X_RES and SCREEN_Y_RES are not defined in the environment
@@ -47,12 +46,6 @@ extern "C" {
 #define DEFAULT_HEIGHT	600
 #define DEFAULT_WIDTH_TEXT "800"
 #define DEFAULT_HEIGHT_TEXT "600"
-#elif defined( CNPLATFORM_yume )
-#define DEFAULT_WIDTH	800
-#define DEFAULT_HEIGHT	480
-#define DEFAULT_WIDTH_TEXT "800"
-#define DEFAULT_HEIGHT_TEXT "480"
-#define FBWRITE_USES_MMAP
 #else
 #define DEFAULT_WIDTH	320
 #define DEFAULT_HEIGHT	240
@@ -232,14 +225,6 @@ typedef struct _BMPHeader {
 } BMPHeader_t;
 #pragma pack()
 
-#ifdef FBWRITE_USES_MMAP
-struct fb_var_screeninfo fb_var;
-struct fb_fix_screeninfo fb_fix;
-char * fb_base_addr = NULL;
-int fb_write_off = 0;
-long int screensize = 0, pagesize;
-#endif
-
 // Open output file in specified format
 int OpenOutput( int width, int height, bool isOutput = true )
 {
@@ -256,76 +241,20 @@ int OpenOutput( int width, int height, bool isOutput = true )
 		return fh;
 	}
 	fprintf( stderr, "fb handle = %d\n", fh );
-	#ifdef FBWRITE_USES_MMAP
-	if (isOutput)
-	{
-
-		// Get fixed screen information
-		if (ioctl(fh, FBIOGET_FSCREENINFO, &fb_fix)) {
-			printf("Error reading fb fixed information.\n");
-			exit(1);
-		}
-	
-		// Get variable screen information
-		if (ioctl(fh, FBIOGET_VSCREENINFO, &fb_var)) {
-			printf("Error reading fb variable information.\n");
-			exit(1);
-		}
-	
-		screensize = fb_var.xres * fb_var.yres * fb_var.bits_per_pixel / 8;
-	
-		pagesize = sysconf(_SC_PAGESIZE);
-		printf("%dx%d, %dbpp, size in KBytes=%ld, pagesize=%ldK\n", fb_var.xres, fb_var.yres, fb_var.bits_per_pixel, 
-			screensize / 1024, pagesize / 1024 );
-		
-		/* fix #6351 comment26 e.m. 2006oct20 */
-		fb_base_addr = (char *)mmap(NULL , screensize+pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, fh, 0);
-	
-		if (fb_base_addr == (char*)-1) {
-			printf("error mapping fb\n");
-			exit(1);
-		}
-		
-		/* temporary fix for 5159, mapping is paged aligned */
-		if (fb_fix.smem_start & (pagesize-1)) {
-			fb_base_addr += (fb_fix.smem_start & (pagesize-1));
-			fprintf(stderr, "Fix alignment 0x%08lx -> %p.\n",
-				fb_fix.smem_start, fb_base_addr);
-		}
-	
-		fb_write_off = 0;
-	
-	}
-	#endif
 	return fh;
 }
 
 // Generic close output
 void CloseFB( int fb_handle )
 {
-#ifdef FBWRITE_USES_MMAP
-	// If opened for input, we won't have the mapping present
-	if (fb_base_addr)
-	{
-		munmap(fb_base_addr, screensize);
-	}
-#endif
 	close( fb_handle );
 }
 
-// Generic write to frame buffer. We may have opened it using mmap (yume)
+// Generic write to frame buffer.
 // Returns bytes written
 int WriteFB( int fb_handle, void *data, int length )
 {
 	unsigned char *_data = (unsigned char *)data;
-#ifdef FBWRITE_USES_MMAP
-	if (fb_base_addr)
-	{
-		memcpy( &fb_base_addr[fb_write_off], _data, length );
-		fb_write_off += length;
-		return length;
-	}
-#endif
 	return write( fb_handle, _data, length );
 }
 
