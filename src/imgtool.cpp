@@ -95,9 +95,9 @@ static const char *bfNames[] = {
 	"rgb565",
 	"rgb888",
 	"bgr565",
-	"argb8888"
+	"argb8888",
+	NULL
 };
-#define NUM_BFNAMES	(sizeof(bfNames)/sizeof(bfNames[0]))
 
 struct imgtool_conf {
 	char *filename;
@@ -136,20 +136,14 @@ static inline int BytesPerFBPixel( void )
 static int BitFormatToEnum( const char *name )
 {
 	int n;
-	for (n = 0; n < NUM_BFNAMES; n++)
-	{
+	for (n = 0; bfNames[n]; n++)
 		if (!strcasecmp( name, bfNames[n] ))
-		{
 			return n;
-		}
-	}
 	printf( "Error: unrecognized name %s\n", name );
 	printf( "Valid names are:\n" );
-	for (n = 0; n < NUM_BFNAMES; n++)
-	{
+	for (n = 0; bfNames[n]; n++)
 		printf( "  %s\n", bfNames[n] );
-	}
-	exit( -1 );
+	return -1;
 }
 
 
@@ -2052,6 +2046,8 @@ int main( int argc, char *argv[] )
 		else if (!strncmp( option, "bitfmt", optionLength ) && optarg)
 		{
 			g_bitFormat = BitFormatToEnum( optarg );
+			if (g_bitFormat < 0)
+				exit(1);
 		}
 		else if (!strncmp( option, "mirrorh", optionLength ))
 		{
