@@ -967,7 +967,7 @@ void ShowPng(struct imgtool_conf *conf)
    png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type,
        &interlace_type, int_p_NULL, int_p_NULL);
 
-	fprintf( stderr, "Image %dx%d %dbpp color type=%d interlace=%d\n", width, height, bit_depth, color_type, interlace_type );
+	fprintf( stderr, "Image %dx%d %dbpp color type=%d interlace=%d\n", (int)width, (int)height, (int)bit_depth, color_type, interlace_type );
 
    /* tell libpng to strip 16 bit/color files down to 8 bits/color */
 	if (bit_depth == 16)
@@ -1035,15 +1035,15 @@ void ShowPng(struct imgtool_conf *conf)
 #ifdef NON_PROGRESSIVE
    /* Allocate the memory to hold the image using the fields of info_ptr. */
 
-	fprintf( stderr, "non-progressive: allocating %d row buffers\n", height );
+	fprintf( stderr, "non-progressive: allocating %d row buffers\n", (int)height );
 
    /* The easiest way to read the image: */
-	int row;
+	png_uint_32 row;
 	png_bytep *row_pointers = (png_bytep*)png_malloc(png_ptr, height*sizeof(png_bytep));
 	bool memory_failed = (row_pointers == NULL);
 	if (memory_failed)
 	{
-		fprintf( stderr, "Error: failed to allocate %d row pointers\n", height );
+		fprintf( stderr, "Error: failed to allocate %d row pointers\n", (int)height );
 	}
 	else
 	{
@@ -1054,7 +1054,7 @@ void ShowPng(struct imgtool_conf *conf)
 		{
 			if (!(row_pointers[row] = (png_byte*)png_malloc(png_ptr, row_bytes)))
 			{
-				fprintf( stderr, "Error: memory allocate failed on row %d\n", row );
+				fprintf( stderr, "Error: memory allocate failed on row %d\n", (int)row );
 				memory_failed = true;
 				break;
 			}
@@ -1103,9 +1103,9 @@ void ShowPng(struct imgtool_conf *conf)
 			fprintf( stderr, "malloc() failed, errno=%d (%s)\n", errno, strerror(errno) );
 			exit( 1 );
 		}
-		int maxRow = height-1;
-		int minRow = 0;
-		int fillRows = 0;
+		png_uint_32 maxRow = height-1;
+		png_uint_32 minRow = 0;
+		png_uint_32 fillRows = 0;
 		if (!g_resize)
 		{
 			// Clip oversized rows
@@ -1120,12 +1120,12 @@ void ShowPng(struct imgtool_conf *conf)
 		{
 			fillRows = y_size - 1 - maxRow - minRow;
 		}
-		fprintf( stderr, "Displaying rows from %d to %d inclusive\n", minRow, maxRow );
+		fprintf( stderr, "Displaying rows from %d to %d inclusive\n", (int)minRow, (int)maxRow );
 		for (row = minRow; row<=maxRow && dispRow < y_size; row++)
 		{
 			if (false)
 			{
-			fprintf( stderr, "Converting row %d ptr=%lx\n", row, (unsigned long)row_pointers[row] );
+			fprintf( stderr, "Converting row %d ptr=%lx\n", (int)row, (long)row_pointers[row] );
 			fprintf( stderr, "  raw=%x,%x,%x %x,%x,%x %x,%x,%x ..\n",
 				row_pointers[row][0],
 				row_pointers[row][1],
