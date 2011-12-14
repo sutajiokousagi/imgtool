@@ -1718,11 +1718,88 @@ out:
 
 #ifndef NO_PNG
 
+
 // Capture frame buffer to png (lossless RGB)
-static void CapturePng(struct imgtool_conf *conf)
+static int CapturePng(struct imgtool_conf *conf)
 {
-	fprintf( stderr, "CapturePng(%s) not yet implemented\n", conf->filename );
+	png_structp png_ptr;
+	png_infop info_ptr;
+	FILE *fp;
+	unsigned char *screen;
+	int x, y;
+	int fd;
+	/* static */
+	png_byte **row_pointers;
+	png_uint_32 bytes_per_row;
+
+	fd = open("/dev/fb0", O_RDWR);
+	screen = (unsigned char *) mmap(0, conf->width * conf->height * BytesPerFBPixel(conf->fmt),
+				PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+	fp = fopen(conf->filename, "wb");
+
+	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+	if (png_ptr == NULL) {
+		munmap(screen, conf->width * conf->height * BytesPerFBPixel(conf->fmt));
+		close(fd);
+		return -1;
+	}
+
+	info_ptr = png_create_info_struct(png_ptr);
+	if (info_ptr == NULL) {
+		png_destroy_write_struct(&png_ptr, NULL);
+		munmap(screen, conf->width * conf->height * BytesPerFBPixel(conf->fmt));
+		close(fd);
+		return -1;
+	}
+
+
+	if (setjmp(png_jmpbuf(png_ptr))) {
+		png_destroy_write_struct(&png_ptr, &info_ptr);
+		fclose(fp);
+		munmap(screen, conf->width * conf->height * BytesPerFBPixel(conf->fmt));
+		close(fd);
+		return -1;
+	}
+
+	png_set_IHDR(png_ptr,
+			info_ptr,
+			conf->width,
+			conf->height,
+			8,
+			PNG_COLOR_TYPE_RGB,
+			PNG_INTERLACE_NONE,
+			PNG_COMPRESSION_TYPE_DEFAULT,
+			PNG_FILTER_TYPE_DEFAULT);
+
+
+	/* Initialize rows of PNG. */
+	bytes_per_row = conf->width * BytesPerFBPixel(conf->fmt);
+	row_pointers = png_malloc(png_ptr, conf->height * sizeof(png_byte *));
+	for (y = 0; y < conf->height; ++y) {
+		uint8_t *row = png_malloc(png_ptr, sizeof(uint8_t) * 3 * conf->width);
+		row_pointers[y] = (png_byte *)row;
+		//memcpy(row, screen, bytes_per_row);
+		FBtoRGB888(conf, row, screen+(y*bytes_per_row), conf->width);
+	}
+
+	/* Actually write the image data. */
+	png_init_io(png_ptr, fp);
+	png_set_rows(png_ptr, info_ptr, row_pointers);
+	png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
+
+	/* Cleanup. */
+	for (y = 0; y < conf->height; y++)
+		png_free(png_ptr, row_pointers[y]);
+	png_free(png_ptr, row_pointers);
+
+	png_destroy_write_struct(&png_ptr, &info_ptr);
+	fclose(fp);
+	munmap(screen, conf->width * conf->height * BytesPerFBPixel(conf->fmt));
+	close(fd);
+	return 0;
 }
+
 
 #define	SUPPORTED_EXTENSIONS ".jpg or .bmp"
 
@@ -2007,6 +2084,8 @@ main( int argc, char *argv[] )
 	conf.fill_color = 0xffffffff;
 	conf.x_pct = 100;
 	conf.y_pct = 100;
+	conf.jpeg_quality = 75;
+	strncpy(conf.output_format, "jpg", sizeof(conf.output_format));
 	snprintf(conf.output, sizeof(conf.output), "/dev/fb%d", conf.fb_num);
 
 	fill_fb_defaults(&conf);
