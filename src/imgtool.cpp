@@ -889,7 +889,7 @@ static void HexDump( int rowNum, const char *rowId, unsigned char *rowBuff, int 
 
 #ifndef NO_PNG
 
-static void ShowPng(struct imgtool_conf *conf)
+static int ShowPng(struct imgtool_conf *conf)
 {
    png_structp png_ptr;
    png_infop info_ptr;
@@ -901,7 +901,7 @@ static void ShowPng(struct imgtool_conf *conf)
    if ((fp = fopen(conf->filename, "rb")) == NULL)
 	{
 		fprintf( stderr, "Error: unable to open %s\n", conf->filename );
-		return;
+		return -1;
 	}
 
    /* Create and initialize the png_struct with the desired error handler
@@ -918,7 +918,7 @@ static void ShowPng(struct imgtool_conf *conf)
    {
       fclose(fp);
       fprintf( stderr, "Failed to create read struct\n" );
-      return;
+      return -1;
    }
 
    /* Allocate/initialize the memory for image information.  REQUIRED. */
@@ -928,7 +928,7 @@ static void ShowPng(struct imgtool_conf *conf)
       fclose(fp);
       png_destroy_read_struct(&png_ptr, png_infopp_NULL, png_infopp_NULL);
       fprintf( stderr, "Failed to create info struct\n" );
-      return ;
+      return -1;
    }
 
    /* Set up the input control if you are using standard C streams */
@@ -1054,7 +1054,7 @@ static void ShowPng(struct imgtool_conf *conf)
 		png_destroy_read_struct(&png_ptr, &info_ptr, png_infopp_NULL);
 
 		fclose( fp );
-		return;
+		return -1;
 	}
 
 #ifdef SUCK_IN_ONE_GO
@@ -1222,6 +1222,8 @@ static void ShowPng(struct imgtool_conf *conf)
       png_destroy_read_struct(&png_ptr, &info_ptr, png_infopp_NULL);
 
 	fclose( fp );
+
+	return 0;
 }
 
 #endif
@@ -1295,7 +1297,8 @@ print_text_marker (j_decompress_ptr cinfo)
   return TRUE;
 }
 
-static void ShowJpeg(struct imgtool_conf *conf)
+static int
+ShowJpeg(struct imgtool_conf *conf)
 {
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -1312,7 +1315,7 @@ static void ShowJpeg(struct imgtool_conf *conf)
 	if (!input_file)
 	{
 		fprintf( stderr, "Cannot open %s r/o\n", conf->filename );
-		return;
+		return -1;
 	}
 
 	/* Initialize the JPEG decompression object with default error handling. */
@@ -1441,6 +1444,8 @@ static void ShowJpeg(struct imgtool_conf *conf)
 	jpeg_destroy_decompress(&cinfo);
 
 	fclose( input_file );
+
+	return 0;
 }
 
 #endif
@@ -1837,7 +1842,7 @@ static const char *imgHelpText = "[options] file\n"
 "	--output=path	Write to path instead of /dev/fb0\n"
 "	--bmpmode=n (0)	Prepend output with bmp header\n"
 "	--fill=r,g,b	Fill frame buffer with rgb value\n"
-"	--bitfmt={rgb565,rgb888,argb8888} (%s)	Specify bit format\n"
+"	--bitfmt={rgb565,rgb888,argb8888} 	Specify bit format\n"
 "	--help			Display this message\n"
 "\n"
 "	* Render options:\n"
@@ -2030,7 +2035,7 @@ main( int argc, char *argv[] )
 	// Are we filling?
 	if (conf.fill_color != 0xffffffff) {
 		FillRGB( &conf );
-		if (!*conf.output) {
+		if (!*conf.filename) {
 			fprintf( stderr, "Filled with 0x%x, no image to load, exiting\n", conf.fill_color );
 			return 0;
 		}
@@ -2044,8 +2049,8 @@ main( int argc, char *argv[] )
 
 	// Any errors?
 	if (error_message) {
-		fprintf( stderr, "%s\nSyntax: %s ", error_message, argv[0] );
-		fprintf( stderr, imgHelpText, conf.width, conf.height );
+		fprintf(stderr, "%s\nSyntax: %s ", error_message, argv[0] );
+		fprintf(stderr, imgHelpText, conf.width, conf.height );
 		return -1;
 	}
 
@@ -2087,32 +2092,21 @@ main( int argc, char *argv[] )
 		}
 #ifdef NO_PNG
 		if (!strcasecmp( ext, ".jpg" ) ||
-			!strcasecmp( ext, ".gif" ) ||
 			!strcasecmp( ext, ".png" ))
 		{
 			fprintf( stderr, "%s not supported (NO_PNG build also does not support jpeg decode)\n", ext );
 			return -1;
 		}
 #else
-		if (!strcasecmp( ext, ".jpg" )) {
-			ShowJpeg(&conf);
-			return 0;
-		}
+		if (!strcasecmp( ext, ".jpg" ))
+			return ShowJpeg(&conf);
 
-		if (!strcasecmp( ext, ".gif" )) {
-			fprintf( stderr, "GIF not supported\n" );
-			return -1;
-		}
-
-		if (!strcasecmp( ext, ".png" )) {
-			ShowPng(&conf);
-			return 0;
-		}
+		if (!strcasecmp( ext, ".png" ))
+			return ShowPng(&conf);
 #endif
 
-		if (!strcasecmp( ext, ".bmp" )) {
+		if (!strcasecmp( ext, ".bmp" ))
 			return ShowBmp(&conf);
-		}
 
 		fprintf( stderr, "%s files not supported\n", ext );
 		return -1;
