@@ -78,7 +78,6 @@ int g_resizeOptions = 0; //RESIZE_SHRINK_MAX; // bits defined above for resize o
 int g_resize = 0;
 char g_dispX[100]; // 1 to display hpixel, percentage granular
 char g_dispY[100]; // 1 to display vpixel (row), percentage granular
-double g_screenGamma = 2.2; // Reasonable default; a good guess for a PC monitor in a dimly lit room
 int x_pct = 100;	// x and y resize percentages
 int y_pct = 100;
 int x_size = DEFAULT_WIDTH;
@@ -105,6 +104,11 @@ static const char *bfNames[] = {
 	"argb8888"
 };
 #define NUM_BFNAMES	(sizeof(bfNames)/sizeof(bfNames[0]))
+
+struct imgtool_conf {
+	char *filename;
+	double gamma;
+};
 
 static inline int BytesPerFBPixel( void )
 {
@@ -903,7 +907,7 @@ void HexDump( int rowNum, const char *rowId, unsigned char *rowBuff, int rowByte
 
 #ifndef NO_PNG
 
-void ShowPng( const char *file )
+void ShowPng(struct imgtool_conf *conf)
 {
    png_structp png_ptr;
    png_infop info_ptr;
@@ -912,9 +916,9 @@ void ShowPng( const char *file )
    int bit_depth, color_type, interlace_type;
    FILE *fp;
 
-   if ((fp = fopen(file, "rb")) == NULL)
+   if ((fp = fopen(conf->filename, "rb")) == NULL)
 	{
-		fprintf( stderr, "Error: unable to open %s\n", file );
+		fprintf( stderr, "Error: unable to open %s\n", conf->filename );
 		return;
 	}
 
@@ -983,9 +987,6 @@ void ShowPng( const char *file )
 	// More stuff here suchas setting alpha and background
 
 
-	double
-      screen_gamma = g_screenGamma;
-
    /* Tell libpng to handle the gamma conversion for you.  The final call
     * is a good guess for PC generated images, but it should be configurable
     * by the user at run time by the user.  It is strongly suggested that
@@ -995,14 +996,14 @@ void ShowPng( const char *file )
    int intent;
 
    if (png_get_sRGB(png_ptr, info_ptr, &intent))
-      png_set_gamma(png_ptr, screen_gamma, 0.45455);
+      png_set_gamma(png_ptr, conf->gamma, 0.45455);
    else
    {
       double image_gamma;
       if (png_get_gAMA(png_ptr, info_ptr, &image_gamma))
-         png_set_gamma(png_ptr, screen_gamma, image_gamma);
+         png_set_gamma(png_ptr, conf->gamma, image_gamma);
       else
-         png_set_gamma(png_ptr, screen_gamma, 0.45455);
+         png_set_gamma(png_ptr, conf->gamma, 0.45455);
    }
 
 
@@ -1891,6 +1892,12 @@ int main( int argc, char *argv[] )
 	const char *errMsg = NULL;
 	char errBuff[256];
 	const char *outputFileDesc;
+
+	struct imgtool_conf conf;
+
+	conf.gamma = 2.2;
+	conf.filename = outputFile;
+
 	// Get default width and height from environment
 	SetDefault( x_size, "SCREEN_X_RES" );
 	SetDefault( y_size, "SCREEN_Y_RES" );
@@ -1929,7 +1936,7 @@ int main( int argc, char *argv[] )
 		{
 			if (optarg)
 			{
-				g_screenGamma = atof( optarg );
+				conf.gamma = atof( optarg );
 			}
 			else
 			{
@@ -2150,7 +2157,7 @@ int main( int argc, char *argv[] )
 		}
 		if (!strcasecmp( ext, ".png" ))
 		{
-			ShowPng( outputFile );
+			ShowPng(&conf);
 			return 0;
 		}
 #endif
