@@ -5,8 +5,12 @@
  * Copyright (C) 2007-2009 Chumby Industries. All rights reserved.
 **/
 
+#define _GNU_SOURCE
+
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <linux/fb.h>
@@ -26,9 +30,7 @@
 
 
 // jpeg
-extern "C" {
 #include <jpeglib.h>
-}
 
 #define VER_DATA	1, 22
 #define VER_FMT		"%d.%02d"
@@ -59,7 +61,7 @@ enum bit_format {
 	BF_BGR565,
 	BF_ARGB8888,
 };
-static const char *bfNames[] = {
+static const char *bit_format_names[] = {
 	"rgb565",
 	"rgb888",
 	"bgr565",
@@ -125,13 +127,13 @@ static inline unsigned int BytesPerFBPixel(enum bit_format fmt)
 static enum bit_format BitFormatToEnum( const char *name )
 {
 	int n;
-	for (n = 0; bfNames[n]; n++)
-		if (!strcasecmp( name, bfNames[n] ))
+	for (n = 0; bit_format_names[n]; n++)
+		if (!strcasecmp( name, bit_format_names[n] ))
 			return (enum bit_format)n;
 	printf( "Error: unrecognized name %s\n", name );
 	printf( "Valid names are:\n" );
-	for (n = 0; bfNames[n]; n++)
-		printf( "  %s\n", bfNames[n] );
+	for (n = 0; bit_format_names[n]; n++)
+		printf( "  %s\n", bit_format_names[n] );
 	return (enum bit_format)-1;
 }
 
@@ -141,6 +143,7 @@ static enum bit_format BitFormatToEnum( const char *name )
 // or <x_size> x <y_size> 32bpp a8 r8 g8 b8
 
 // Header on disk for BMP files
+#if 0
 #pragma pack(2)
 typedef struct _BitmapInfoHeader {
 // Offsets are from start of file
@@ -215,20 +218,16 @@ typedef struct _BMPHeader {
 	BitmapInfoHeader_t infoHeader;
 } BMPHeader_t;
 #pragma pack()
+#endif
 
 // Open output file in specified format
-static int OpenOutput( int width, int height, char *dest, bool isOutput = true )
+static int OpenOutput(int width, int height, char *dest, uint8_t isOutput)
 {
 	int openFlags = isOutput ? O_RDWR | O_CREAT | O_TRUNC : O_RDONLY;
 	fprintf( stderr, "Opening %s for %s\n", isOutput ? "output" : "input", dest);
 	return open( dest, openFlags, 0644 );
 }
 
-// Generic close output
-static void CloseFB( int fb_handle )
-{
-	close( fb_handle );
-}
 
 // Generic write to frame buffer.
 // Returns bytes written
@@ -291,46 +290,46 @@ static void DumpVector( const char *label, char *v )
 }
 
 // Adjust output size and width based on resize flags. true if resizing
-static bool AdjustOutputSize( unsigned int& width, unsigned int& height, struct imgtool_conf *conf )
+static int AdjustOutputSize( unsigned int *width, unsigned int *height, struct imgtool_conf *conf )
 {
 	conf->x_pct = 100;
 	conf->y_pct = 100;
 	conf->resize = 0;
 	if (!(conf->resize_options & RESIZE_ANY))
 	{
-		return false;
+		return 0;
 	}
 	// Reject bogus proportions
-	if (width <= 0 || height <= 0)
+	if (*width <= 0 || *height <= 0)
 	{
-		return false;
+		return 0;
 	}
-	if ((RESIZE_SHRINK_X & conf->resize_options) && width > conf->width)
+	if ((RESIZE_SHRINK_X & conf->resize_options) && *width > conf->width)
 	{
-		conf->x_pct = (conf->width*100L / ((unsigned long)width));
-		width = conf->width;
+		conf->x_pct = (conf->width*100L / ((unsigned long)*width));
+		*width = conf->width;
 	}
-	if ((RESIZE_SHRINK_Y & conf->resize_options) && height > conf->height)
+	if ((RESIZE_SHRINK_Y & conf->resize_options) && *height > conf->height)
 	{
-		conf->y_pct = (conf->height*100L / ((unsigned long)height));
-		height = conf->height;
+		conf->y_pct = (conf->height*100L / ((unsigned long)*height));
+		*height = conf->height;
 	}
-	if ((RESIZE_SHRINK_MAX & conf->resize_options) && (width > conf->width || height > conf->height))
+	if ((RESIZE_SHRINK_MAX & conf->resize_options) && (*width > conf->width || *height > conf->height))
 	{
-		conf->x_pct = (conf->width*100L / ((unsigned long)width));
-		conf->y_pct = (conf->height*100L / ((unsigned long)height));
+		conf->x_pct = (conf->width*100L / ((unsigned long)*width));
+		conf->y_pct = (conf->height*100L / ((unsigned long)*height));
 		if (conf->y_pct < conf->x_pct)
 		{
-			height = conf->height;
-			width = (conf->width*100L * width) / 100L;
+			*height = conf->height;
+			*width = (conf->width*100L * *width) / 100L;
 		}
 		else
 		{
-			if (width > conf->width)
+			if (*width > conf->width)
 			{
-				width = conf->width;
+				*width = conf->width;
 			}
-			height = (conf->height*100L * height) / 100L;
+			*height = (conf->height*100L * *height) / 100L;
 		}
 
 	}
@@ -1020,7 +1019,7 @@ static int ShowPng(struct imgtool_conf *conf)
    /* The easiest way to read the image: */
 	png_uint_32 row;
 	png_bytep *row_pointers = (png_bytep*)png_malloc(png_ptr, height*sizeof(png_bytep));
-	bool memory_failed = (row_pointers == NULL);
+	int memory_failed = (row_pointers == NULL);
 	if (memory_failed)
 	{
 		fprintf( stderr, "Error: failed to allocate %d row pointers\n", (int)height );
@@ -1035,7 +1034,7 @@ static int ShowPng(struct imgtool_conf *conf)
 			if (!(row_pointers[row] = (png_byte*)png_malloc(png_ptr, row_bytes)))
 			{
 				fprintf( stderr, "Error: memory allocate failed on row %d\n", (int)row );
-				memory_failed = true;
+				memory_failed = 1;
 				break;
 			}
 			//else fprintf( stderr, "row_pointers[%d] = %lx\n", row, (unsigned long)row_pointers[row] );
@@ -1065,7 +1064,7 @@ static int ShowPng(struct imgtool_conf *conf)
 	unsigned int scaledWidth, scaledHeight;
 	scaledWidth = width;
 	scaledHeight = height;
-	if (AdjustOutputSize( scaledWidth, scaledHeight, conf))
+	if (AdjustOutputSize( &scaledWidth, &scaledHeight, conf))
 	{
 		fprintf( stderr, "Scaling from %dX%d to %dX%d (%d%%/%d%%)\n",
 			(int)width, (int)height,
@@ -1074,7 +1073,7 @@ static int ShowPng(struct imgtool_conf *conf)
 	}
 
    // Convert rows from R8G8B8 to frame buffer format
-   int fb = OpenOutput( scaledWidth, scaledHeight, conf->output );
+   int fb = OpenOutput(scaledWidth, scaledHeight, conf->output, 1);
    if (fb > 0)
    {
 		unsigned char *fbRow = (unsigned char *)alloca( BytesPerFBPixel(conf->fmt)*conf->width );
@@ -1103,21 +1102,6 @@ static int ShowPng(struct imgtool_conf *conf)
 		fprintf( stderr, "Displaying rows from %d to %d inclusive\n", (int)minRow, (int)maxRow );
 		for (row = minRow; row<=maxRow && dispRow < conf->height; row++)
 		{
-			if (false)
-			{
-			fprintf( stderr, "Converting row %d ptr=%lx\n", (int)row, (long)row_pointers[row] );
-			fprintf( stderr, "  raw=%x,%x,%x %x,%x,%x %x,%x,%x ..\n",
-				row_pointers[row][0],
-				row_pointers[row][1],
-				row_pointers[row][2],
-				row_pointers[row][3],
-				row_pointers[row][4],
-				row_pointers[row][5],
-				row_pointers[row][6],
-				row_pointers[row][7],
-				row_pointers[row][8]
-				);
-			}
 
 			// If resizing, determine whether we skip this one
 			if (conf->resize & Y_SHRINK)
@@ -1149,7 +1133,7 @@ static int ShowPng(struct imgtool_conf *conf)
 			WriteFB( fb, fbRow, BytesPerFBPixel(conf->fmt) * conf->width );
 		}
 		fprintf( stderr, "Closing frame buffer\n" );
-		CloseFB( fb );
+		close(fb);
    }
 #else
 
@@ -1351,7 +1335,7 @@ ShowJpeg(struct imgtool_conf *conf)
 	unsigned int scaledWidth, scaledHeight;
 	scaledWidth = cinfo.output_width;
 	scaledHeight = cinfo.output_height;
-	if (AdjustOutputSize( scaledWidth, scaledHeight, conf))
+	if (AdjustOutputSize(&scaledWidth, &scaledHeight, conf))
 	{
 		fprintf( stderr, "Scaling from %dX%d to %dX%d (%d%%/%d%%)\n",
 			(int)cinfo.output_width, (int)cinfo.output_height,
@@ -1366,7 +1350,7 @@ ShowJpeg(struct imgtool_conf *conf)
 	//(*dest_mgr->start_output) (&cinfo, dest_mgr);
 
 	// Open frame buffer
-   int fb = OpenOutput( scaledWidth, scaledHeight, conf->output );
+   int fb = OpenOutput(scaledWidth, scaledHeight, conf->output, 1);
    if (fb > 0)
    {
 		unsigned char *fbRow = (unsigned char *)malloc(BytesPerFBPixel(conf->fmt)*conf->width);
@@ -1427,7 +1411,7 @@ ShowJpeg(struct imgtool_conf *conf)
 		}
 
 		fprintf( stderr, "Closing frame buffer\n" );
-		CloseFB( fb );
+		close(fb);
 		free( fbRow );
    }
    else
@@ -1451,6 +1435,7 @@ ShowJpeg(struct imgtool_conf *conf)
 #endif
 
 // Display bmp to frame buffer. No resizing - must be the right size
+#if 0
 static int ShowBmp(struct imgtool_conf *conf)
 {
 	// Open input file
@@ -1604,11 +1589,12 @@ exit_free_output_buff:
 	free( output_buff );
 exit_free_input_buff:
 	free( input_buff );
-	CloseFB( hOutput );
+	close(hOutput);
 exit_close_input:
 	close( hInput );
 	return ret;
 }
+#endif
 
 // Capture frame buffer to jpeg
 static void CaptureJpeg(struct imgtool_conf *conf)
@@ -1617,7 +1603,7 @@ static void CaptureJpeg(struct imgtool_conf *conf)
 	struct jpeg_error_mgr jerr;
 	FILE * output_file;
 	JDIMENSION num_scanlines;
-	bool usingStdout = (strcmp( conf->filename, "-" ) == 0);
+	int usingStdout = (strcmp( conf->filename, "-" ) == 0);
 	JSAMPARRAY buffer;
 	JDIMENSION buffer_height;
 
@@ -1675,7 +1661,7 @@ static void CaptureJpeg(struct imgtool_conf *conf)
 	jpeg_start_compress(&cinfo, TRUE);
 
 	// Open frame buffer for input
-	int fb = OpenOutput( cinfo.image_width, cinfo.image_height, conf->output, false );
+	int fb = OpenOutput(cinfo.image_width, cinfo.image_height, conf->output, 0);
 	if (fb > 0)
 	{
 		unsigned char *fbRow = (unsigned char *)malloc(BytesPerFBPixel(conf->fmt)*conf->width);
@@ -1710,7 +1696,7 @@ static void CaptureJpeg(struct imgtool_conf *conf)
 		}
 
 		fprintf( stderr, "Closing frame buffer\n" );
-		CloseFB( fb );
+		close(fb);
 		free( fbRow );
 	}
 	else
@@ -1758,7 +1744,7 @@ static int FillRGB(struct imgtool_conf *conf)
 	char *scr;
 
 	// Now open output
-	hOutput = OpenOutput( conf->width, conf->height, conf->output, true );
+	hOutput = OpenOutput(conf->width, conf->height, conf->output, 1);
 	if (hOutput < 0)
 	{
 		fprintf( stderr, "Error: failed to open %s (errno=%d)\n", conf->output, errno );
@@ -1821,7 +1807,7 @@ exit_free_output_buff:
 	free( output_buff );
 exit_free_input_buff:
 	free( input_buff );
-	CloseFB( hOutput );
+	close(hOutput);
 exit_close_input:
 	return ret;
 }
@@ -2058,7 +2044,7 @@ main( int argc, char *argv[] )
 	// Handle mode
 	if (conf.op == OP_CAPTURE) {
 		fprintf( stderr, "Capturing to %s from fb%d format %s\n",
-			strcmp(conf.filename, "-")?"<stdout>":conf.filename, conf.fb_num, conf.output_format);
+			!strcmp(conf.filename, "-")?"<stdout>":conf.filename, conf.fb_num, conf.output_format);
 
 		if (!strcmp( conf.output_format, "jpg" ))
 			CaptureJpeg(&conf);
@@ -2083,7 +2069,7 @@ main( int argc, char *argv[] )
 			return -1;
 		}
 
-		fprintf( stderr, "Drawing image %s\n", strcmp(conf.filename, "-")?"<stdout>":conf.filename );
+		fprintf( stderr, "Drawing image %s\n", !strcmp(conf.filename, "-")?"<stdout>":conf.filename );
 
 		char *ext = strrchr( conf.filename, '.' );
 		if (ext == NULL) {
@@ -2105,8 +2091,10 @@ main( int argc, char *argv[] )
 			return ShowPng(&conf);
 #endif
 
+#if 0
 		if (!strcasecmp( ext, ".bmp" ))
 			return ShowBmp(&conf);
+#endif
 
 		fprintf( stderr, "%s files not supported\n", ext );
 		return -1;
