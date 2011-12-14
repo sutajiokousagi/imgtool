@@ -1662,49 +1662,48 @@ static void CaptureJpeg(struct imgtool_conf *conf)
 
 	// Open frame buffer for input
 	int fb = OpenOutput(cinfo.image_width, cinfo.image_height, conf->output, 0);
-	if (fb > 0)
-	{
-		unsigned char *fbRow = (unsigned char *)malloc(BytesPerFBPixel(conf->fmt)*conf->width);
-		if (!fbRow)
-		{
-			fprintf( stderr, "malloc failed error %d (%s)\n", errno, strerror(errno) );
-			exit( 1 );
-		}
-		int errCount = 0;
-		int rowCount = 0;
-
-		/* Process data */
-		while (cinfo.next_scanline < cinfo.image_height && errCount == 0) {
-			num_scanlines = buffer_height;
-			// Get a row from frame buffer in native format
-			if (read( fb, fbRow, BytesPerFBPixel(conf->fmt) * conf->width ) < (int)(BytesPerFBPixel(conf->fmt) * conf->width))
-			{
-				fprintf( stderr, "Error: failed reading row %d from frame buffer\n", cinfo.next_scanline );
-				errCount++;
-				continue;
-			}
-			// Convert to RGB888
-			FBtoRGB888( conf, buffer[0], fbRow, cinfo.image_width );
-			if (conf->debug_level && rowCount < 10)
-			{
-				HexDump( rowCount, "r8g8b8", buffer[0], cinfo.image_width*3 );
-				HexDump( rowCount, "fb", fbRow, cinfo.image_width*BytesPerFBPixel(conf->fmt) );
-			}
-			rowCount++;
-			// Compress
-			(void) jpeg_write_scanlines(&cinfo, buffer, num_scanlines);
-		}
-
-		fprintf( stderr, "Closing frame buffer\n" );
-		close(fb);
-		free( fbRow );
-	}
-	else
-	{
+	if (fb == -1) {
 		fprintf( stderr, "Error: could not open frame buffer for input!\n" );
+		goto out;
 	}
+
+	unsigned char *fbRow = (unsigned char *)malloc(BytesPerFBPixel(conf->fmt)*conf->width);
+	if (!fbRow) {
+		fprintf( stderr, "malloc failed error %d (%s)\n", errno, strerror(errno) );
+		exit( 1 );
+	}
+	int errCount = 0;
+	int rowCount = 0;
+
+	/* Process data */
+	while (cinfo.next_scanline < cinfo.image_height && errCount == 0) {
+		num_scanlines = buffer_height;
+		// Get a row from frame buffer in native format
+		if (read( fb, fbRow, BytesPerFBPixel(conf->fmt) * conf->width ) < (int)(BytesPerFBPixel(conf->fmt) * conf->width))
+		{
+			fprintf( stderr, "Error: failed reading row %d from frame buffer\n", cinfo.next_scanline );
+			errCount++;
+			continue;
+		}
+		// Convert to RGB888
+		FBtoRGB888( conf, buffer[0], fbRow, cinfo.image_width );
+		if (conf->debug_level && rowCount < 10)
+		{
+			HexDump( rowCount, "r8g8b8", buffer[0], cinfo.image_width*3 );
+			HexDump( rowCount, "fb", fbRow, cinfo.image_width*BytesPerFBPixel(conf->fmt) );
+		}
+		rowCount++;
+		// Compress
+		(void) jpeg_write_scanlines(&cinfo, buffer, num_scanlines);
+	}
+
+	fprintf( stderr, "Closing frame buffer\n" );
+	close(fb);
+	free( fbRow );
 
 	// FIXME add JFIF comments on source, date/time, hostname, guid, etc
+
+out:
 
 	/* Finish compression and release memory */
 	//(*src_mgr->finish_input) (&cinfo, src_mgr);
