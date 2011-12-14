@@ -491,17 +491,7 @@ static void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, un
 			r = src[ri] >> 3;
 			g = src[gi] >> 2;
 			b = src[bi] >> 3;
-			// Convert alpha to white
-			/**********
-			This does not produce satisfactory results
-			Artwork needs to be saved with a white layer as background
-			if (src[3] == 0x0)
-			{
-				r = 0xff >> 3;
-				g = 0xff >> 2;
-				b = 0xff >> 3;
-			}
-			***********/
+
 			int pixIndex = conf->mirror_h ? 2 * (conf->width - dcol) : 2 * dcol;
 			// hg - not sure why these appear to be in little-endian order?
 			dest[pixIndex + 1] = (r << 3) | (g >> 3);
@@ -610,51 +600,52 @@ static void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsign
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R5G6B5
 	int bytes_per_pixel = nPalette > 0 ? 1 : 3;
-	// Fill to end of row
-	memset( dest, 0, BytesPerFBPixel(conf->fmt)*conf->width );
 	int nStart = 0;
-	// Check for clipping required
-	if (nColumns > conf->width && conf->resize == 0)
-	{
-		nColumns = conf->width;
-	}
+
 	unsigned int col, dcol;
-	src += (bytes_per_pixel * nStart);
 	unsigned char r, g, b;
 	unsigned char *high = &r;
 	unsigned char *mid = &g;
 	unsigned char *low = &b;
 	int dest_hi = 1;
 	int dest_lo = 0;
-	if (conf->fmt == BF_BGR565)
-	{
+	if (conf->fmt == BF_BGR565) {
 		high = &b;
 		low = &r;
 		dest_hi = 0;
 		dest_lo = 1;
 	}
-	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++)
-	{
+
+	src += (bytes_per_pixel * nStart);
+	// Fill to end of row
+	memset(dest, 0, BytesPerFBPixel(conf->fmt)*conf->width);
+
+	// Check for clipping required
+	if (nColumns > conf->width && conf->resize == 0)
+		nColumns = conf->width;
+
+	for (col = nStart, dcol = 0; dcol < conf->width && col < nColumns; col++) {
+
 		// Check horizontal display vector if resizing
-		if ((conf->resize & X_SHRINK) == 0 || conf->disp_x[col%100])
-		{
+		if ((conf->resize & X_SHRINK) == 0 || conf->disp_x[col%100]) {
+			int pixIndex = conf->mirror_h ? 2 * (conf->width - dcol) : dcol * 2;
+
 			// src: rrrrrrrr gggggggg bbbbbbbb aaaaaaaa
 			// dst: rrrrrggg gggbbbbb
-			if (nPalette)
-			{
+			if (nPalette) {
 				int pi = *src % nPalette;
 				r = pal[pi].red >> 3;
 				g = pal[pi].green >> 2;
 				b = pal[pi].blue >> 3;
 			}
-			else
-			{
+
+			else {
 				r = src[0] >> 3;
 				g = src[1] >> 2;
 				b = src[2] >> 3;
 			}
+
 			// hg - not sure why these appear to be in little-endian order?
-			int pixIndex = conf->mirror_h ? 2 * (conf->width - dcol) : dcol * 2;
 			dest[pixIndex + dest_hi] = (*high << 3) | (*mid >> 3);
 			dest[pixIndex + dest_lo] = (*mid << 5) | *low;
 			dcol++;
@@ -1981,7 +1972,42 @@ parse_args(struct imgtool_conf *conf, int argc, char **argv)
 }
 
 
-int main( int argc, char *argv[] )
+static int
+fill_fb_defaults (struct imgtool_conf *conf)
+{
+	int ret, fd;
+	struct fb_var_screeninfo var;
+
+	fd = open("/dev/fb0", O_RDONLY);
+	if (fd == -1)
+		return -1;
+
+	ret = ioctl(fd, FBIOGET_VSCREENINFO, &var);
+	if (ret == -1)
+		goto out;
+
+	conf->width = var.xres;
+	conf->height = var.yres;
+	if (var.bits_per_pixel == 16) {
+		if (var.red.offset)
+			conf->fmt = BF_RGB565;
+		else
+			conf->fmt = BF_BGR565;
+	}
+	else if (var.bits_per_pixel == 24)
+		conf->fmt = BF_RGB888;
+	else
+		conf->fmt = BF_ARGB8888;
+	ret = 0;
+
+out:
+	close(fd);
+	return ret;
+}
+
+
+int
+main( int argc, char *argv[] )
 {
 	const char *error_message = NULL;
 	struct imgtool_conf conf;
@@ -1992,6 +2018,8 @@ int main( int argc, char *argv[] )
 	conf.x_pct = 100;
 	conf.y_pct = 100;
 	snprintf(conf.output, sizeof(conf.output), "/dev/fb%d", conf.fb_num);
+
+	fill_fb_defaults(&conf);
 
 
 	fprintf( stderr, "%s " VER_FMT " (built for " CNPLATFORM ")\n", argv[0], VER_DATA );
