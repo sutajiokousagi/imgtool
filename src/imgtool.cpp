@@ -55,8 +55,6 @@ extern "C" {
 
 // Global flags
 int g_dbg = 0;
-int g_sleep = 2; // Default sleep time in seconds
-int g_fbNum = 0; // Frame buffer index, default = /dev/fb0
 int g_jpegQuality = 75; // Default jpeg quality, override with --quality=
 char g_fbDev[256]; // File to write to
 #define RESIZE_ANY	0xfff	 // Mask to check for any resize bits
@@ -316,7 +314,7 @@ bool AdjustOutputSize( int& width, int& height, int& xpct, int& ypct )
 	xpct = 100;
 	ypct = 100;
 	g_resize = 0;
-	if (g_resizeOptions & RESIZE_ANY == 0)
+	if (!(g_resizeOptions & RESIZE_ANY))
 	{
 		return false;
 	}
@@ -372,23 +370,6 @@ bool AdjustOutputSize( int& width, int& height, int& xpct, int& ypct )
 
 #ifndef NO_PNG
 
-/* Make some variables global, so we could access them faster: */
-static int
-/*    PosFlag = FALSE,
-    HelpFlag = FALSE,
-    DisplayFlag = FALSE,
-    ForceFlag = FALSE, */
-    ColorMapSize = 0,
-    BackGround = 0,
-    XPosX = 0,
-    XPosY = 0,
-    InterlacedOffset[] = { 0, 4, 2, 1 }, /* The way Interlaced image should. */
-    InterlacedJumps[] = { 8, 8, 4, 2 };    /* be read - offsets and jumps... */
-static char
-    *DisplayName = NULL;
-/*
-static ColorMapObject
-    *ColorMap; */
 
 
 ///////////////////////// png ////////////////////////
@@ -777,7 +758,7 @@ void RGB8toARGB8888( unsigned char *dest, unsigned const char *src, int nColumns
 				r = pal[pi].red;
 				g = pal[pi].green;
 				b = pal[pi].blue;
-				//a = pal[pi].alpha;
+				a = 255;
 			}
 			else
 			{
@@ -915,7 +896,7 @@ void FBtoRGB888( unsigned char *dest, unsigned const char *src, int nColumns )
 }
 
 // Dump a display row in hex
-void HexDump( int rowNum, char *rowId, unsigned char *rowBuff, int rowBytes )
+void HexDump( int rowNum, const char *rowId, unsigned char *rowBuff, int rowBytes )
 {
 	int n;
 	// Space for 4 hex bytes per pixel, 2 characters per hex byte, plus leadin
@@ -1668,7 +1649,6 @@ exit_free_output_buff:
 	free( output_buff );
 exit_free_input_buff:
 	free( input_buff );
-exit_close_output:
 	CloseFB( hOutput );
 exit_close_input:
 	close( hInput );
@@ -1816,9 +1796,6 @@ int FillRGB( unsigned int rgb )
 	int ret = -1;
 	int hOutput = -1;
 	int bpp;
-	int bmp_width;
-	int bmp_height;
-	int bmp_compression;
 	int bytes_per_pixel;
 	int row, col;
 	unsigned char *input_buff;
@@ -1889,7 +1866,6 @@ exit_free_output_buff:
 	free( output_buff );
 exit_free_input_buff:
 	free( input_buff );
-exit_close_output:
 	CloseFB( hOutput );
 exit_close_input:
 	return ret;
@@ -1906,7 +1882,7 @@ SetDefault( int& value, const char *envName )
 	}
 }
 
-char *imgHelpText = "[options] file\n\
+const char *imgHelpText = "[options] file\n\
 	where file is output (mode=cap) or - to write to stdout, or\n\
 	if mode==draw, a " SUPPORTED_EXTENSIONS " image file to write to frame buffer\n\
 	and options are any of the following:\n\
@@ -1937,6 +1913,7 @@ int main( int argc, char *argv[] )
 {
 	fprintf( stderr, "%s " VER_FMT " (built for " CNPLATFORM ")\n", argv[0], VER_DATA );
 	int n;
+	int fbNum = 0;
 	// Parse options
 	char opMode[16] = "draw";
 	char outputFmt[16] = "jpg";
@@ -2012,7 +1989,7 @@ int main( int argc, char *argv[] )
 		{
 			if (optarg)
 			{
-				g_outputFmt = g_fbNum = atoi( optarg );
+				g_outputFmt = fbNum = atoi( optarg );
 			}
 			else
 			{
@@ -2108,8 +2085,8 @@ int main( int argc, char *argv[] )
 	// Are we filling?
 	if (g_fill != 0xffffffff)
 	{
-		sprintf( g_fbDev, "/dev/fb%d", g_fbNum );
-		g_outputFmt = g_fbNum;
+		sprintf( g_fbDev, "/dev/fb%d", fbNum );
+		g_outputFmt = fbNum;
 		FillRGB( g_fill );
 		if (!outputFile[0])
 		{
@@ -2139,8 +2116,8 @@ int main( int argc, char *argv[] )
 	}
 	else
 	{
-		sprintf( g_fbDev, "/dev/fb%d", g_fbNum );
-		g_outputFmt = g_fbNum;
+		sprintf( g_fbDev, "/dev/fb%d", fbNum );
+		g_outputFmt = fbNum;
 	}
 	if (!strcmp( outputFile, "-" ))
 	{
@@ -2153,7 +2130,7 @@ int main( int argc, char *argv[] )
 	// Handle mode
 	if (!strcmp( opMode, "cap" ))
 	{
-		fprintf( stderr, "Capturing to %s from fb%d format %s\n", outputFileDesc, g_fbNum, outputFmt );
+		fprintf( stderr, "Capturing to %s from fb%d format %s\n", outputFileDesc, fbNum, outputFmt );
 		if (!strcmp( outputFmt, "jpg" ))
 		{
 			CaptureJpeg( outputFile );
