@@ -55,7 +55,6 @@ extern "C" {
 
 // Global flags
 int g_dbg = 0;
-int g_jpegQuality = 75; // Default jpeg quality, override with --quality=
 char g_fbDev[256]; // File to write to
 #define RESIZE_ANY	0xfff	 // Mask to check for any resize bits
 #define	RESIZE_STRETCH_X	0x01	// Stretch width to fit
@@ -105,6 +104,9 @@ static const char *bfNames[] = {
 struct imgtool_conf {
 	char *filename;
 	double gamma;
+
+	/* JPEG settings */
+	int jpeg_quality;
 
 	/* BMP settings */
 	int bmp_mode;
@@ -1683,7 +1685,7 @@ void CaptureJpeg(struct imgtool_conf *conf)
 
     /* Set quantization tables for selected quality. */
     /* Some or all may be overridden if -qtables is present. */
-    jpeg_set_quality(&cinfo, g_jpegQuality, FALSE	/* by default, allow 16-bit quantizers */);
+    jpeg_set_quality(&cinfo, conf->jpeg_quality, FALSE	/* by default, allow 16-bit quantizers */);
 
 	/* Specify data destination for compression */
 	jpeg_stdio_dest(&cinfo, output_file);
@@ -1953,10 +1955,10 @@ int main( int argc, char *argv[] )
 		{
 			if (optarg)
 			{
-				g_jpegQuality = atoi( optarg );
-				if (g_jpegQuality < 1 || g_jpegQuality > 100)
+				conf.jpeg_quality = atoi( optarg );
+				if (conf.jpeg_quality < 1 || conf.jpeg_quality > 100)
 				{
-					sprintf( errBuff, "Specified JPEG compression quality %d is outside acceptable range 1-100\n", g_jpegQuality );
+					sprintf( errBuff, "Specified JPEG compression quality %d is outside acceptable range 1-100\n", conf.jpeg_quality );
 					errMsg = errBuff;
 				}
 			}
