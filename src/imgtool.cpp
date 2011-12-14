@@ -1831,33 +1831,33 @@ exit_close_input:
 }
 
 
-static const char *imgHelpText = "[options] file\n\
-	where file is output (mode=cap) or - to write to stdout, or\n\
-	if mode==draw, a " SUPPORTED_EXTENSIONS " image file to write to frame buffer\n\
-	and options are any of the following:\n\
-\n\
-	* General options:\n\
-	--debug		  	Increase verbosity\n\
-	--fb=n (0)	  	Write to / read from frame buffer (0 or 1)\n\
-	--mode={cap,draw} (draw) Capture frame buffer to file (cap)\n\
-				or draw image file to frame buffer\n\
-	--width=n (%3d)		Width in pixels\n\
-	--height=n (%3d)	Height in pixels\n\
-	--output=path	Write to path instead of /dev/fb0\n\
-	--bmpmode=n (0)	Prepend output with bmp header\n\
-	--fill=r,g,b	Fill frame buffer with rgb value\n\
-	--bitfmt={rgb565,rgb888,argb8888} (%s)	Specify bit format\n\
-	--help			Display this message\n\
-\n\
-	* Render options:\n\
-	--gamma=f (2.2)	  	Screen gamma (for png decode)\n\
-	--resize=n (64)	  	Resize options (draw mode only)\n\
-	--mirrorh		Mirror horizontally\n\
-\n\
-	* Capture options:\n\
-	--quality=pct (75)	JPEG capture quality (0-100)\n\
-	--fmt={jpg,png} (jpg)	Format to write (if mode==cap)\n\
-";
+static const char *imgHelpText = "[options] file\n"
+"	where file is output (mode=cap) or - to write to stdout, or\n"
+"	if mode==draw, a " SUPPORTED_EXTENSIONS " image file to write to frame buffer\n"
+"	and options are any of the following:\n"
+"\n"
+"	* General options:\n"
+"	--debug		  	Increase verbosity\n"
+"	--fb=n (0)	  	Write to / read from frame buffer (0 or 1)\n"
+"	--mode={cap,draw} (draw) Capture frame buffer to file (cap)\n"
+"				or draw image file to frame buffer\n"
+"	--width=n (%3d)		Width in pixels\n"
+"	--height=n (%3d)	Height in pixels\n"
+"	--output=path	Write to path instead of /dev/fb0\n"
+"	--bmpmode=n (0)	Prepend output with bmp header\n"
+"	--fill=r,g,b	Fill frame buffer with rgb value\n"
+"	--bitfmt={rgb565,rgb888,argb8888} (%s)	Specify bit format\n"
+"	--help			Display this message\n"
+"\n"
+"	* Render options:\n"
+"	--gamma=f (2.2)	  	Screen gamma (for png decode)\n"
+"	--resize=n (64)	  	Resize options (draw mode only)\n"
+"	--mirrorh		Mirror horizontally\n"
+"\n"
+"	* Capture options:\n"
+"	--quality=pct (75)	JPEG capture quality (0-100)\n"
+"	--fmt={jpg,png} (jpg)	Format to write (if mode==cap)\n"
+"";
 
 
 static const char *
@@ -1970,11 +1970,8 @@ parse_args(struct imgtool_conf *conf, int argc, char **argv)
 		else if (!strncmp( option, "mirrorh", optionLength ))
 			conf->mirror_h = 1;
 
-		else if (!strncmp( option, "help", optionLength )) {
-			fprintf( stderr, "Syntax:\n%s ", argv[0] );
-			fprintf( stderr, imgHelpText, conf->width, conf->height, bfNames[conf->fmt] );
-			exit(0);
-		}
+		else if (!strncmp( option, "help", optionLength ))
+			return "";
 
 		else
 			return "Unrecognized option specified";
