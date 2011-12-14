@@ -24,8 +24,6 @@
 #include <png.h>
 #endif
 
-// libungif
-//#include "gif_lib.h"
 
 // jpeg
 extern "C" {
@@ -35,23 +33,6 @@ extern "C" {
 #define VER_DATA	1, 22
 #define VER_FMT		"%d.%02d"
 
-#if !defined( CNPLATFORM )
-#define CNPLATFORM "__CNPLATFORM_undefined__"
-#endif
-
-
-#if defined( CNPLATFORM_stormwind ) || defined( CNPLATFORM_silvermoon )
-// These are defaults in case SCREEN_X_RES and SCREEN_Y_RES are not defined in the environment
-#define DEFAULT_WIDTH	800
-#define DEFAULT_HEIGHT	600
-#define DEFAULT_WIDTH_TEXT "800"
-#define DEFAULT_HEIGHT_TEXT "600"
-#else
-#define DEFAULT_WIDTH	320
-#define DEFAULT_HEIGHT	240
-#define DEFAULT_WIDTH_TEXT "320"
-#define DEFAULT_HEIGHT_TEXT "240"
-#endif
 
 // Global flags
 #define RESIZE_ANY	0xfff	 // Mask to check for any resize bits
@@ -71,11 +52,12 @@ extern "C" {
 #define Y_STRETCH		0x02
 #define	X_SHRINK		0x04	// Shrinking X
 #define Y_SHRINK		0x08
-enum eBitFormats {
+
+enum bit_format {
 	BF_RGB565,
 	BF_RGB888,
 	BF_BGR565,
-	BF_ARGB8888
+	BF_ARGB8888,
 };
 static const char *bfNames[] = {
 	"rgb565",
@@ -85,14 +67,24 @@ static const char *bfNames[] = {
 	NULL
 };
 
+enum operation {
+	OP_DRAW,
+	OP_CAPTURE,
+};
+
 struct imgtool_conf {
-	char *filename;
-	char output[256];
+	char filename[2048];
+	char output[2048];
 	double gamma;
-	enum eBitFormats fmt;
+	enum bit_format fmt;
 	unsigned int width, height;
+	int fb_num;
+	enum operation op;
 
 	int debug_level;
+
+	/* Filename extension of output type */
+	char output_format[16];
 
 	/* Resizing parameters */
 	int x_pct;
@@ -115,7 +107,7 @@ struct imgtool_conf {
 	unsigned int fill_color;
 };
 
-static inline unsigned int BytesPerFBPixel(enum eBitFormats fmt)
+static inline unsigned int BytesPerFBPixel(enum bit_format fmt)
 {
 	switch (fmt)
 	{
@@ -130,17 +122,17 @@ static inline unsigned int BytesPerFBPixel(enum eBitFormats fmt)
 	}
 }
 
-static enum eBitFormats BitFormatToEnum( const char *name )
+static enum bit_format BitFormatToEnum( const char *name )
 {
 	int n;
 	for (n = 0; bfNames[n]; n++)
 		if (!strcasecmp( name, bfNames[n] ))
-			return (enum eBitFormats)n;
+			return (enum bit_format)n;
 	printf( "Error: unrecognized name %s\n", name );
 	printf( "Valid names are:\n" );
 	for (n = 0; bfNames[n]; n++)
 		printf( "  %s\n", bfNames[n] );
-	return (enum eBitFormats)-1;
+	return (enum bit_format)-1;
 }
 
 
@@ -225,7 +217,7 @@ typedef struct _BMPHeader {
 #pragma pack()
 
 // Open output file in specified format
-int OpenOutput( int width, int height, char *dest, bool isOutput = true )
+static int OpenOutput( int width, int height, char *dest, bool isOutput = true )
 {
 	int openFlags = isOutput ? O_RDWR | O_CREAT | O_TRUNC : O_RDONLY;
 	fprintf( stderr, "Opening %s for %s\n", isOutput ? "output" : "input", dest);
@@ -233,7 +225,7 @@ int OpenOutput( int width, int height, char *dest, bool isOutput = true )
 }
 
 // Generic close output
-void CloseFB( int fb_handle )
+static void CloseFB( int fb_handle )
 {
 	close( fb_handle );
 }
@@ -247,7 +239,7 @@ static int WriteFB( int fb_handle, void *data, int length )
 }
 
 // Seed pixel display vector based on percentage
-void SetDisplayVector( int pct, char *v )
+static void SetDisplayVector( int pct, char *v )
 {
 	memset( v, 0, 100 );
 	// Eliminate 0 and 100% cases
@@ -285,7 +277,7 @@ void SetDisplayVector( int pct, char *v )
 	}
 }
 
-void DumpVector( const char *label, char *v )
+static void DumpVector( const char *label, char *v )
 {
 	char mask[128];
 	memset( mask, '.', 100 );
@@ -299,7 +291,7 @@ void DumpVector( const char *label, char *v )
 }
 
 // Adjust output size and width based on resize flags. true if resizing
-bool AdjustOutputSize( unsigned int& width, unsigned int& height, struct imgtool_conf *conf )
+static bool AdjustOutputSize( unsigned int& width, unsigned int& height, struct imgtool_conf *conf )
 {
 	conf->x_pct = 100;
 	conf->y_pct = 100;
@@ -458,7 +450,7 @@ void end_callback(png_structp png_ptr, png_infop info)
 
 #endif
 
-void user_warning_fn(png_structp png_ptr,
+static void user_warning_fn(png_structp png_ptr,
         png_const_charp warning_msg)
 {
 	fprintf( stderr, "libpng warning: %s\n", warning_msg );
@@ -466,7 +458,7 @@ void user_warning_fn(png_structp png_ptr,
 
 #endif
 
-void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
+static void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R5G6B5 or B5G6R5
@@ -522,7 +514,7 @@ void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, unsigned 
 }
 
 // line copy for rgb888
-void ARGB8888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
+static void ARGB8888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R8G8B8
@@ -560,7 +552,7 @@ void ARGB8888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned 
 }
 
 // line copy for argb888
-void ARGB8888toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
+static void ARGB8888toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in A8R8G8B8
 	// Destination is in A8R8G8B8
@@ -592,7 +584,7 @@ void ARGB8888toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigne
 }
 
 // bitmap-format agnostic form of line copy
-void ARGB8888toFB( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
+static void ARGB8888toFB( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
 {
 	switch (conf->fmt)
 	{
@@ -613,7 +605,7 @@ void ARGB8888toFB( struct imgtool_conf *conf, unsigned char *dest, unsigned cons
 }
 
 #ifndef NO_PNG
-void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns, int nPalette, png_colorp pal )
+static void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns, int nPalette, png_colorp pal )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R5G6B5
@@ -672,7 +664,7 @@ void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsigned cons
 	}
 }
 
-void RGB8toR8G8B8( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns, int nPalette, png_colorp pal )
+static void RGB8toR8G8B8( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns, int nPalette, png_colorp pal )
 {
 	// Source is in R8G8B8 (alpha should be stripped) or indexed
 	// Destination is in R8G8B8
@@ -719,7 +711,7 @@ void RGB8toR8G8B8( struct imgtool_conf *conf, unsigned char *dest, unsigned cons
 	}
 }
 
-void RGB8toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int unsigned nColumns, int nPalette, png_colorp pal )
+static void RGB8toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int unsigned nColumns, int nPalette, png_colorp pal )
 {
 	// Source is in R8G8B8 (alpha should be stripped) or indexed
 	// Destination is in R8G8B8
@@ -770,7 +762,7 @@ void RGB8toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned co
 }
 
 // Bit format-agnostic form
-void RGB8toFBPng( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
+static void RGB8toFBPng( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
 {
 	switch (conf->fmt)
 	{
@@ -792,7 +784,7 @@ void RGB8toFBPng( struct imgtool_conf *conf, unsigned char *dest, unsigned const
 #endif
 
 // Get a single pixel row capture from the frame buffer and convert to RGB888
-void RGB565toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
+static void RGB565toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in R5G6B5 (alpha should be stripped)
 	// Destination is in R8G8B8
@@ -829,7 +821,7 @@ void RGB565toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned co
 }
 
 // Get a single pixel row capture from the frame buffer and convert to RGB888
-void RGB888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
+static void RGB888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, unsigned int nColumns )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R8G8B8
@@ -865,7 +857,7 @@ void RGB888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned co
 }
 
 // Bitformat-agnostic method to get a single pixel row as RGB888
-void FBtoRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
+static void FBtoRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
 {
 	switch (conf->fmt)
 	{
@@ -886,7 +878,7 @@ void FBtoRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const 
 }
 
 // Dump a display row in hex
-void HexDump( int rowNum, const char *rowId, unsigned char *rowBuff, int rowBytes )
+static void HexDump( int rowNum, const char *rowId, unsigned char *rowBuff, int rowBytes )
 {
 	int n;
 	// Space for 4 hex bytes per pixel, 2 characters per hex byte, plus leadin
@@ -906,7 +898,7 @@ void HexDump( int rowNum, const char *rowId, unsigned char *rowBuff, int rowByte
 
 #ifndef NO_PNG
 
-void ShowPng(struct imgtool_conf *conf)
+static void ShowPng(struct imgtool_conf *conf)
 {
    png_structp png_ptr;
    png_infop info_ptr;
@@ -1312,7 +1304,7 @@ print_text_marker (j_decompress_ptr cinfo)
   return TRUE;
 }
 
-void ShowJpeg(struct imgtool_conf *conf)
+static void ShowJpeg(struct imgtool_conf *conf)
 {
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -1463,7 +1455,7 @@ void ShowJpeg(struct imgtool_conf *conf)
 #endif
 
 // Display bmp to frame buffer. No resizing - must be the right size
-int ShowBmp(struct imgtool_conf *conf)
+static int ShowBmp(struct imgtool_conf *conf)
 {
 	// Open input file
 	int hInput = open( conf->filename, O_RDONLY );
@@ -1623,7 +1615,7 @@ exit_close_input:
 }
 
 // Capture frame buffer to jpeg
-void CaptureJpeg(struct imgtool_conf *conf)
+static void CaptureJpeg(struct imgtool_conf *conf)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -1746,7 +1738,7 @@ void CaptureJpeg(struct imgtool_conf *conf)
 #ifndef NO_PNG
 
 // Capture frame buffer to png (lossless RGB)
-void CapturePng(struct imgtool_conf *conf)
+static void CapturePng(struct imgtool_conf *conf)
 {
 	fprintf( stderr, "CapturePng(%s) not yet implemented\n", conf->filename );
 }
@@ -1758,7 +1750,7 @@ void CapturePng(struct imgtool_conf *conf)
 #endif
 
 // Fill frame buffer with rgb value
-int FillRGB(struct imgtool_conf *conf)
+static int FillRGB(struct imgtool_conf *conf)
 {
 	int ret = -1;
 	int hOutput = -1;
@@ -1839,7 +1831,7 @@ exit_close_input:
 }
 
 
-const char *imgHelpText = "[options] file\n\
+static const char *imgHelpText = "[options] file\n\
 	where file is output (mode=cap) or - to write to stdout, or\n\
 	if mode==draw, a " SUPPORTED_EXTENSIONS " image file to write to frame buffer\n\
 	and options are any of the following:\n\
@@ -1866,37 +1858,17 @@ const char *imgHelpText = "[options] file\n\
 	--quality=pct (75)	JPEG capture quality (0-100)\n\
 	--fmt={jpg,png} (jpg)	Format to write (if mode==cap)\n\
 ";
-int main( int argc, char *argv[] )
+
+
+static const char *
+parse_args(struct imgtool_conf *conf, int argc, char **argv)
 {
-	fprintf( stderr, "%s " VER_FMT " (built for " CNPLATFORM ")\n", argv[0], VER_DATA );
 	int n;
-	int fbNum = 0;
-	// Parse options
-	char opMode[16] = "draw";
-	char outputFmt[16] = "jpg";
-	// This is the output file (mode=cap) or input file (mode=draw)
-	char outputFile[256] = ""; // Default to stdout
-	// This is the file for rendering to (mode=draw). Defaults to /dev/fb[0|1]
-	char renderFile[256] = "";
-	const char *errMsg = NULL;
-	char errBuff[256];
-	const char *outputFileDesc;
-
-	struct imgtool_conf conf;
-
-	bzero(&conf, sizeof(conf));
-	conf.gamma = 2.2;
-	conf.filename = outputFile;
-	conf.fill_color = 0xffffffff;
-	conf.x_pct = 100;
-	conf.y_pct = 100;
 
 	// Get default width and height from environment
-	for (n = 1; n < argc; n++)
-	{
-		if (argv[n][0] != '-' || !strcmp(argv[n],"-"))
-		{
-			strncpy( outputFile, argv[n], sizeof(outputFile) );
+	for (n = 1; n < argc; n++) {
+		if (argv[n][0] != '-' || !strcmp(argv[n],"-")) {
+			strncpy( conf->filename, argv[n], sizeof(conf->filename) );
 			continue;
 		}
 		char *option = argv[n] + 2; // Skip --
@@ -1904,123 +1876,83 @@ int main( int argc, char *argv[] )
 		if (optarg) optarg++; // skip =
 		int optionLength = strcspn( option, "=" );
 		if (optionLength == 0)
-		{
-			errMsg = "Invalid option specified";
-			continue;
+			return "Invalid option specified";
+
+		if (!strncmp( option, "debug", optionLength )) {
+			conf->debug_level++;
 		}
-		if (!strncmp( option, "debug", optionLength ))
-		{
-			conf.debug_level++;
+
+		else if (!strncmp( option, "resize", optionLength )) {
+			if (!optarg)
+				return "Numeric option required for --resize= option";
+			conf->resize_options = atoi( optarg );
 		}
-		else if (!strncmp( option, "resize", optionLength ))
-		{
-			if (optarg)
-			{
-				conf.resize_options = atoi( optarg );
-			}
+
+		else if (!strncmp( option, "gamma", optionLength )) {
+			if (!optarg)
+				return "Float option required for --gamma= option";
+			conf->gamma = atof( optarg );
+		}
+
+		else if (!strncmp( option, "quality", optionLength )) {
+			if (!optarg)
+				return "Numeric percentage required for --quality= option";
+			conf->jpeg_quality = atoi( optarg );
+			if (conf->jpeg_quality < 1 || conf->jpeg_quality > 100)
+				return "Specified JPEG compression quality is outside acceptable range 1-100";
+		}
+
+		else if (!strncmp( option, "fb", optionLength )) {
+			if (!optarg)
+				return "Numeric arg required for --fb= option";
+			conf->fb_num = atoi( optarg );
+			snprintf( conf->output, sizeof(conf->output), "/dev/fb%d", conf->fb_num );
+		}
+
+		else if (!strncmp( option, "fmt", optionLength )) {
+			if (!optarg)
+				return "Either jpg or png required for --fmt= option";
+			strncpy( conf->output_format, optarg, sizeof(conf->output_format) );
+		}
+
+		else if (!strncmp( option, "output", optionLength )) {
+			if (!optarg)
+				return "Output filename required for --output= option";
+			strncpy(conf->output, optarg, sizeof(conf->output) );
+		}
+
+		else if (!strncmp( option, "mode", optionLength )) {
+			if (optarg && !strcmp(optarg, "draw"))
+				conf->op = OP_DRAW;
+			else if (optarg && !strcmp(optarg, "cap"))
+				conf->op = OP_CAPTURE;
 			else
-			{
-				errMsg = "Numeric option required for --resize= option";
-			}
+				return "Unrecognized mode";
 		}
-		else if (!strncmp( option, "gamma", optionLength ))
-		{
-			if (optarg)
-			{
-				conf.gamma = atof( optarg );
-			}
-			else
-			{
-				errMsg = "Float option required for --gamma= option";
-			}
-		}
-		else if (!strncmp( option, "quality", optionLength ))
-		{
-			if (optarg)
-			{
-				conf.jpeg_quality = atoi( optarg );
-				if (conf.jpeg_quality < 1 || conf.jpeg_quality > 100)
-				{
-					sprintf( errBuff, "Specified JPEG compression quality %d is outside acceptable range 1-100\n", conf.jpeg_quality );
-					errMsg = errBuff;
-				}
-			}
-			else
-			{
-				errMsg = "Numeric percentage required for --quality= option";
-			}
-		}
-		else if (!strncmp( option, "fb", optionLength ))
-		{
-			if (optarg)
-			{
-				fbNum = atoi( optarg );
-			}
-			else
-			{
-				errMsg = "Numeric arg required for --fb= option";
-			}
-		}
-		else if (!strncmp( option, "fmt", optionLength ))
-		{
-			if (optarg)
-			{
-				strncpy( outputFmt, optarg, sizeof(outputFmt) );
-			}
-			else
-			{
-				errMsg = "Either jpg or png required for --fmt= option";
-			}
-		}
-		else if (!strncmp( option, "output", optionLength ))
-		{
-			if (optarg)
-			{
-				strncpy( renderFile, optarg, sizeof(renderFile) );
-			}
-			else
-			{
-				errMsg = "Output filename required for --output= option";
-			}
-		}
-		else if (!strncmp( option, "mode", optionLength ))
-		{
-			if (optarg)
-			{
-				strncpy( opMode, optarg, sizeof(opMode) );
-			}
-			else
-			{
-				errMsg = "Either cap or draw required for --mode= option";
-			}
-		}
+
 		else if (!strncmp( option, "width", optionLength ) && optarg)
-		{
-			conf.width = atoi( optarg );
-		}
+			conf->width = atoi( optarg );
+
 		else if (!strncmp( option, "height", optionLength ) && optarg)
-		{
-			conf.height = atoi( optarg );
-		}
+			conf->height = atoi( optarg );
+
 		else if (!strncmp( option, "bmpmode", optionLength ) && optarg)
-		{
-			conf.bmp_mode = atoi( optarg );
-		}
-		else if (!strncmp( option, "fill", optionLength ) && optarg)
-		{
+			conf->bmp_mode = atoi( optarg );
+
+		else if (!strncmp( option, "fill", optionLength ) && optarg) {
 			int r, g, b, a;
 			int num_elements = sscanf( optarg, "%d,%d,%d,%d", &r, &g, &b, &a );
 			if (num_elements >= 3)
 			{
-				conf.fill_color = (((unsigned int)r) << 16) | (((unsigned int)g) << 8) | (unsigned int)b;
+				conf->fill_color = (((unsigned int)r) << 16) | (((unsigned int)g) << 8) | (unsigned int)b;
 				if (num_elements > 3)
 				{
-					conf.fill_color |= (((unsigned int)a) << 24);
-					fprintf( stderr, "Filling with r,g,b,a %d,%d,%d,%d (0x%08x)\n", r, g, b, a, conf.fill_color );
+					conf->fill_color |= (((unsigned int)a) << 24);
+					fprintf( stderr, "Filling with r,g,b,a %d,%d,%d,%d (0x%08x)\n", r, g, b, a, conf->fill_color );
 				}
 				else
 				{
-					fprintf( stderr, "Filling with r,g,b %d,%d,%d (0x%06x00)\n", r, g, b, conf.fill_color );
+					fprintf( stderr, "Filling with r,g,b %d,%d,%d (0x%06x00)\n", r, g, b, conf->fill_color );
 				}
 			}
 			else
@@ -2028,79 +1960,80 @@ int main( int argc, char *argv[] )
 				fprintf( stderr, "Unable to scan 3+ rgb[a] values from %s\n", optarg );
 			}
 		}
-		else if (!strncmp( option, "bitfmt", optionLength ) && optarg)
-		{
-			conf.fmt = BitFormatToEnum( optarg );
-			if (conf.fmt < 0)
+
+		else if (!strncmp( option, "bitfmt", optionLength ) && optarg) {
+			conf->fmt = BitFormatToEnum( optarg );
+			if (conf->fmt < 0)
 				exit(1);
 		}
+
 		else if (!strncmp( option, "mirrorh", optionLength ))
-		{
-			conf.mirror_h = 1;
-		}
-		else if (!strncmp( option, "help", optionLength ))
-		{
+			conf->mirror_h = 1;
+
+		else if (!strncmp( option, "help", optionLength )) {
 			fprintf( stderr, "Syntax:\n%s ", argv[0] );
-			fprintf( stderr, imgHelpText, conf.width, conf.height, bfNames[conf.fmt] );
-			return 0;
+			fprintf( stderr, imgHelpText, conf->width, conf->height, bfNames[conf->fmt] );
+			exit(0);
 		}
+
 		else
-		{
-			errMsg = "Unrecognized option specified";
-		}
+			return "Unrecognized option specified";
 	}
+
+	return NULL;
+}
+
+
+int main( int argc, char *argv[] )
+{
+	const char *error_message = NULL;
+	struct imgtool_conf conf;
+
+	bzero(&conf, sizeof(conf));
+	conf.gamma = 2.2;
+	conf.fill_color = 0xffffffff;
+	conf.x_pct = 100;
+	conf.y_pct = 100;
+	snprintf(conf.output, sizeof(conf.output), "/dev/fb%d", conf.fb_num);
+
+
+	fprintf( stderr, "%s " VER_FMT " (built for " CNPLATFORM ")\n", argv[0], VER_DATA );
+
+	error_message = parse_args(&conf, argc, argv);
+
+
 	// Are we filling?
-	if (conf.fill_color != 0xffffffff)
-	{
-		snprintf( conf.output, sizeof(conf.output), "/dev/fb%d", fbNum );
+	if (conf.fill_color != 0xffffffff) {
 		FillRGB( &conf );
-		if (!outputFile[0])
-		{
+		if (!*conf.output) {
 			fprintf( stderr, "Filled with 0x%x, no image to load, exiting\n", conf.fill_color );
 			return 0;
 		}
 	}
+
 	// Did we get anything to process?
-	if (!outputFile[0] && errMsg == NULL)
-	{
-		errMsg = errBuff;
-		sprintf( errBuff, "No file specified for %s", opMode[0] == 'd' ? "output" : "input" );
+	if (!conf.filename[0] && error_message == NULL) {
+		fprintf(stderr, "No file specified for %s", conf.op == OP_DRAW ? "output" : "input" );
+		error_message = "";
 	}
+
 	// Any errors?
-	if (errMsg)
-	{
-		fprintf( stderr, "%s\nSyntax: %s ", errMsg, argv[0] );
+	if (error_message) {
+		fprintf( stderr, "%s\nSyntax: %s ", error_message, argv[0] );
 		fprintf( stderr, imgHelpText, conf.width, conf.height );
 		return -1;
 	}
-	// Create render file if not specified
-	if (renderFile[0])
-	{
-		fprintf( stderr, "Writing output to %s instead of frame buffer\n", renderFile );
-		strncpy( conf.output, renderFile, sizeof(conf.output) );
-	}
-	else
-	{
-		sprintf( conf.output, "/dev/fb%d", fbNum );
-	}
-	if (!strcmp( outputFile, "-" ))
-	{
-		outputFileDesc = "<stdout>";
-	}
-	else
-	{
-		outputFileDesc = outputFile;
-	}
+
+
 	// Handle mode
-	if (!strcmp( opMode, "cap" ))
-	{
-		fprintf( stderr, "Capturing to %s from fb%d format %s\n", outputFileDesc, fbNum, outputFmt );
-		if (!strcmp( outputFmt, "jpg" ))
-		{
+	if (conf.op == OP_CAPTURE) {
+		fprintf( stderr, "Capturing to %s from fb%d format %s\n",
+			strcmp(conf.filename, "-")?"<stdout>":conf.filename, conf.fb_num, conf.output_format);
+
+		if (!strcmp( conf.output_format, "jpg" ))
 			CaptureJpeg(&conf);
-		}
-		else if (!strcmp( outputFmt, "png" ))
-		{
+
+		else if (!strcmp( conf.output_format, "png" )) {
 #ifdef NO_PNG
 			fprintf( stderr, "--fmt=png not supported (NO_PNG)\n" );
 			return -1;
@@ -2108,24 +2041,23 @@ int main( int argc, char *argv[] )
 			CapturePng(&conf);
 #endif
 		}
-		else
-		{
-			fprintf( stderr, "Error: unsupported output format %s - use jpg or png\n", outputFmt );
+		else {
+			fprintf( stderr, "Error: unsupported output format %s - use jpg or png\n", conf.output_format );
 			return -1;
 		}
 	}
-	else if (!strcmp( opMode, "draw" ))
-	{
-		if (!strcmp( outputFile, "-" ))
-		{
+
+	else if (conf.op == OP_DRAW) {
+		if (!strcmp( conf.filename, "-" )) {
 			fprintf( stderr, "Unable to accept image file from stdin\n" );
 			return -1;
 		}
-		fprintf( stderr, "Drawing image %s\n", outputFileDesc );
-		char *ext = strrchr( outputFile, '.' );
-		if (ext == NULL)
-		{
-			fprintf( stderr, "No extension found in %s\n", outputFile );
+
+		fprintf( stderr, "Drawing image %s\n", strcmp(conf.filename, "-")?"<stdout>":conf.filename );
+
+		char *ext = strrchr( conf.filename, '.' );
+		if (ext == NULL) {
+			fprintf( stderr, "No extension found in %s\n", conf.filename );
 			return -1;
 		}
 #ifdef NO_PNG
@@ -2137,33 +2069,32 @@ int main( int argc, char *argv[] )
 			return -1;
 		}
 #else
-		if (!strcasecmp( ext, ".jpg" ))
-		{
+		if (!strcasecmp( ext, ".jpg" )) {
 			ShowJpeg(&conf);
 			return 0;
 		}
-		if (!strcasecmp( ext, ".gif" ))
-		{
-			//ShowGif( argv[n] );
+
+		if (!strcasecmp( ext, ".gif" )) {
 			fprintf( stderr, "GIF not supported\n" );
 			return -1;
 		}
-		if (!strcasecmp( ext, ".png" ))
-		{
+
+		if (!strcasecmp( ext, ".png" )) {
 			ShowPng(&conf);
 			return 0;
 		}
 #endif
-		if (!strcasecmp( ext, ".bmp" ))
-		{
+
+		if (!strcasecmp( ext, ".bmp" )) {
 			return ShowBmp(&conf);
 		}
-		fprintf( stderr, "%s files not currently supported\n", ext );
+
+		fprintf( stderr, "%s files not supported\n", ext );
 		return -1;
 	}
-	else
-	{
-		fprintf( stderr, "Unhandled mode %s (must be cap or draw)\n", opMode );
+
+	else {
+		fprintf( stderr, "Unhandled mode -- must be cap or draw\n");
 		return -1;
 	}
 
