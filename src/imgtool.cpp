@@ -77,8 +77,6 @@ int g_resizeOptions = 0; //RESIZE_SHRINK_MAX; // bits defined above for resize o
 int g_resize = 0;
 char g_dispX[100]; // 1 to display hpixel, percentage granular
 char g_dispY[100]; // 1 to display vpixel (row), percentage granular
-int x_pct = 100;	// x and y resize percentages
-int y_pct = 100;
 int x_size = DEFAULT_WIDTH;
 int y_size = DEFAULT_HEIGHT;
 enum eBitFormats {
@@ -104,6 +102,10 @@ static const char *bfNames[] = {
 struct imgtool_conf {
 	char *filename;
 	double gamma;
+
+	/* Resizing parameters */
+	int x_pct;
+	int y_pct;
 
 	/* JPEG settings */
 	int jpeg_quality;
@@ -1089,12 +1091,12 @@ void ShowPng(struct imgtool_conf *conf)
 	int scaledWidth, scaledHeight;
 	scaledWidth = width;
 	scaledHeight = height;
-	if (AdjustOutputSize( scaledWidth, scaledHeight, x_pct, y_pct ))
+	if (AdjustOutputSize( scaledWidth, scaledHeight, conf->x_pct, conf->y_pct ))
 	{
 		fprintf( stderr, "Scaling from %dX%d to %dX%d (%d%%/%d%%)\n",
 			(int)width, (int)height,
 			scaledWidth, scaledHeight,
-			x_pct, y_pct );
+			conf->x_pct, conf->y_pct );
 	}
 
    // Convert rows from R8G8B8 to frame buffer format
@@ -1372,12 +1374,12 @@ void ShowJpeg(struct imgtool_conf *conf)
 	int scaledWidth, scaledHeight;
 	scaledWidth = cinfo.output_width;
 	scaledHeight = cinfo.output_height;
-	if (AdjustOutputSize( scaledWidth, scaledHeight, x_pct, y_pct ))
+	if (AdjustOutputSize( scaledWidth, scaledHeight, conf->x_pct, conf->y_pct ))
 	{
 		fprintf( stderr, "Scaling from %dX%d to %dX%d (%d%%/%d%%)\n",
 			(int)cinfo.output_width, (int)cinfo.output_height,
 			scaledWidth, scaledHeight,
-			x_pct, y_pct );
+			conf->x_pct, conf->y_pct );
 	}
 
 	/* Start decompressor */
@@ -1905,6 +1907,8 @@ int main( int argc, char *argv[] )
 	conf.gamma = 2.2;
 	conf.filename = outputFile;
 	conf.fill_color = 0xffffffff;
+	conf.x_pct = 100;
+	conf.y_pct = 100;
 
 	// Get default width and height from environment
 	SetDefault( x_size, "SCREEN_X_RES" );
