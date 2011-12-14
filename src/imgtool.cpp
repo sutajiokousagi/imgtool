@@ -82,9 +82,6 @@ int x_pct = 100;	// x and y resize percentages
 int y_pct = 100;
 int x_size = DEFAULT_WIDTH;
 int y_size = DEFAULT_HEIGHT;
-int g_bmpMode = 0; // If 1, write bmp header and do not flip vertically
-unsigned int g_fill = 0xffffffff; // Fill values can be 16-bit or 32-bit
-bool g_mirrorH = false;
 enum eBitFormats {
 	BF_RGB565,
 	BF_RGB888,
@@ -108,6 +105,13 @@ static const char *bfNames[] = {
 struct imgtool_conf {
 	char *filename;
 	double gamma;
+
+	/* BMP settings */
+	int bmp_mode;
+	int mirror_h;
+
+	/* Fill settings */
+	unsigned int fill_color;
 };
 
 static inline int BytesPerFBPixel( void )
@@ -467,7 +471,7 @@ void user_warning_fn(png_structp png_ptr,
 
 #endif
 
-void ARGB8888toRGB565( unsigned char *dest, unsigned const char *src, int nColumns )
+void ARGB8888toRGB565( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R5G6B5 or B5G6R5
@@ -511,7 +515,7 @@ void ARGB8888toRGB565( unsigned char *dest, unsigned const char *src, int nColum
 				b = 0xff >> 3;
 			}
 			***********/
-			int pixIndex = g_mirrorH ? 2 * (x_size - dcol) : 2 * dcol;
+			int pixIndex = conf->mirror_h ? 2 * (x_size - dcol) : 2 * dcol;
 			// hg - not sure why these appear to be in little-endian order?
 			dest[pixIndex + 1] = (r << 3) | (g >> 3);
 			dest[pixIndex + 0] = (g << 5) | b;
@@ -523,7 +527,7 @@ void ARGB8888toRGB565( unsigned char *dest, unsigned const char *src, int nColum
 }
 
 // line copy for rgb888
-void ARGB8888toRGB888( unsigned char *dest, unsigned const char *src, int nColumns )
+void ARGB8888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R8G8B8
@@ -549,7 +553,7 @@ void ARGB8888toRGB888( unsigned char *dest, unsigned const char *src, int nColum
 			r = src[2];
 			g = src[1];
 			b = src[0];
-			int pixIndex = g_mirrorH ? 3 * (x_size - dcol) : 3 * dcol;
+			int pixIndex = conf->mirror_h ? 3 * (x_size - dcol) : 3 * dcol;
 			dest[pixIndex + 2] = b;
 			dest[pixIndex + 1] = g;
 			dest[pixIndex + 0] = r;
@@ -561,7 +565,7 @@ void ARGB8888toRGB888( unsigned char *dest, unsigned const char *src, int nColum
 }
 
 // line copy for argb888
-void ARGB8888toARGB8888( unsigned char *dest, unsigned const char *src, int nColumns )
+void ARGB8888toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
 {
 	// Source is in A8R8G8B8
 	// Destination is in A8R8G8B8
@@ -593,19 +597,19 @@ void ARGB8888toARGB8888( unsigned char *dest, unsigned const char *src, int nCol
 }
 
 // bitmap-format agnostic form of line copy
-void ARGB8888toFB( unsigned char *dest, unsigned const char *src, int nColumns )
+void ARGB8888toFB( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
 {
 	switch (g_bitFormat)
 	{
 		case BF_RGB565:
 		case BF_BGR565:
-			ARGB8888toRGB565( dest, src, nColumns );
+			ARGB8888toRGB565( conf, dest, src, nColumns );
 			break;
 		case BF_RGB888:
-			ARGB8888toRGB888( dest, src, nColumns );
+			ARGB8888toRGB888( conf, dest, src, nColumns );
 			break;
 		case BF_ARGB8888:
-			ARGB8888toARGB8888( dest, src, nColumns );
+			ARGB8888toARGB8888( conf, dest, src, nColumns );
 			break;
 		default:
 			printf( "%s() in %s:%d - unsupported bit format %d\n", __FUNCTION__, __FILE__, __LINE__, g_bitFormat );
@@ -614,7 +618,7 @@ void ARGB8888toFB( unsigned char *dest, unsigned const char *src, int nColumns )
 }
 
 #ifndef NO_PNG
-void RGB8toR5G6B5( unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
+void RGB8toR5G6B5( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R5G6B5
@@ -663,7 +667,7 @@ void RGB8toR5G6B5( unsigned char *dest, unsigned const char *src, int nColumns, 
 				b = src[2] >> 3;
 			}
 			// hg - not sure why these appear to be in little-endian order?
-			int pixIndex = g_mirrorH ? 2 * (x_size - dcol) : dcol * 2;
+			int pixIndex = conf->mirror_h ? 2 * (x_size - dcol) : dcol * 2;
 			dest[pixIndex + dest_hi] = (*high << 3) | (*mid >> 3);
 			dest[pixIndex + dest_lo] = (*mid << 5) | *low;
 			dcol++;
@@ -673,7 +677,7 @@ void RGB8toR5G6B5( unsigned char *dest, unsigned const char *src, int nColumns, 
 	}
 }
 
-void RGB8toR8G8B8( unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
+void RGB8toR8G8B8( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
 {
 	// Source is in R8G8B8 (alpha should be stripped) or indexed
 	// Destination is in R8G8B8
@@ -709,7 +713,7 @@ void RGB8toR8G8B8( unsigned char *dest, unsigned const char *src, int nColumns, 
 				g = src[1];
 				b = src[2];
 			}
-			int pixIndex = g_mirrorH ? 3 * (x_size - dcol) : dcol * 3;
+			int pixIndex = conf->mirror_h ? 3 * (x_size - dcol) : dcol * 3;
 			dest[pixIndex + 2] = r;
 			dest[pixIndex + 1] = g;
 			dest[pixIndex + 0] = b;
@@ -720,7 +724,7 @@ void RGB8toR8G8B8( unsigned char *dest, unsigned const char *src, int nColumns, 
 	}
 }
 
-void RGB8toARGB8888( unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
+void RGB8toARGB8888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
 {
 	// Source is in R8G8B8 (alpha should be stripped) or indexed
 	// Destination is in R8G8B8
@@ -758,7 +762,7 @@ void RGB8toARGB8888( unsigned char *dest, unsigned const char *src, int nColumns
 				b = src[2];
 				a = src[3];
 			}
-			int pixIndex = g_mirrorH ? 4 * (x_size - dcol) : dcol * 4;
+			int pixIndex = conf->mirror_h ? 4 * (x_size - dcol) : dcol * 4;
 			dest[pixIndex + 3] = a;
 			dest[pixIndex + 2] = r;
 			dest[pixIndex + 1] = g;
@@ -771,19 +775,19 @@ void RGB8toARGB8888( unsigned char *dest, unsigned const char *src, int nColumns
 }
 
 // Bit format-agnostic form
-void RGB8toFBPng( unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
+void RGB8toFBPng( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns, int nPalette, png_colorp pal )
 {
 	switch (g_bitFormat)
 	{
 		case BF_RGB565:
 		case BF_BGR565:
-			RGB8toR5G6B5( dest, src, nColumns, nPalette, pal );
+			RGB8toR5G6B5( conf, dest, src, nColumns, nPalette, pal );
 			break;
 		case BF_RGB888:
-			RGB8toR8G8B8( dest, src, nColumns, nPalette, pal );
+			RGB8toR8G8B8( conf, dest, src, nColumns, nPalette, pal );
 			break;
 		case BF_ARGB8888:
-			RGB8toARGB8888( dest, src, nColumns, nPalette, pal );
+			RGB8toARGB8888( conf, dest, src, nColumns, nPalette, pal );
 			break;
 		default:
 			printf( "%s() in %s:%d - unsupported bit format %d\n", __FUNCTION__, __FILE__, __LINE__, g_bitFormat );
@@ -793,7 +797,7 @@ void RGB8toFBPng( unsigned char *dest, unsigned const char *src, int nColumns, i
 #endif
 
 // Get a single pixel row capture from the frame buffer and convert to RGB888
-void RGB565toRGB888( unsigned char *dest, unsigned const char *src, int nColumns )
+void RGB565toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
 {
 	// Source is in R5G6B5 (alpha should be stripped)
 	// Destination is in R8G8B8
@@ -830,7 +834,7 @@ void RGB565toRGB888( unsigned char *dest, unsigned const char *src, int nColumns
 }
 
 // Get a single pixel row capture from the frame buffer and convert to RGB888
-void RGB888toRGB888( unsigned char *dest, unsigned const char *src, int nColumns )
+void RGB888toRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
 {
 	// Source is in R8G8B8 (alpha should be stripped)
 	// Destination is in R8G8B8
@@ -866,19 +870,19 @@ void RGB888toRGB888( unsigned char *dest, unsigned const char *src, int nColumns
 }
 
 // Bitformat-agnostic method to get a single pixel row as RGB888
-void FBtoRGB888( unsigned char *dest, unsigned const char *src, int nColumns )
+void FBtoRGB888( struct imgtool_conf *conf, unsigned char *dest, unsigned const char *src, int nColumns )
 {
 	switch (g_bitFormat)
 	{
 		case BF_RGB565:
 		case BF_BGR565:
-			RGB565toRGB888( dest, src, nColumns );
+			RGB565toRGB888( conf, dest, src, nColumns );
 			break;
 		case BF_RGB888:
-			RGB888toRGB888( dest, src, nColumns );
+			RGB888toRGB888( conf, dest, src, nColumns );
 			break;
 		case BF_ARGB8888:
-			ARGB8888toRGB888( dest, src, nColumns );
+			ARGB8888toRGB888( conf, dest, src, nColumns );
 			break;
 		default:
 			printf( "%s() in %s:%d - unsupported bit format %d\n", __FUNCTION__, __FILE__, __LINE__, g_bitFormat );
@@ -1148,7 +1152,7 @@ void ShowPng(struct imgtool_conf *conf)
 				}
 			}
 
-			RGB8toFBPng( fbRow, row_pointers[row], width, num_palette, palette );
+			RGB8toFBPng( conf, fbRow, row_pointers[row], width, num_palette, palette );
 			WriteFB( fb, fbRow, BytesPerFBPixel() * x_size );
 			dispRow++;
 			if (g_dbg && dispRow <= 10)
@@ -1313,7 +1317,7 @@ print_text_marker (j_decompress_ptr cinfo)
   return TRUE;
 }
 
-void ShowJpeg( const char *file )
+void ShowJpeg(struct imgtool_conf *conf)
 {
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -1326,10 +1330,10 @@ void ShowJpeg( const char *file )
 	JDIMENSION buffer_height;
 	FILE * input_file;
 
-	input_file = fopen( file, "rb" );
+	input_file = fopen( conf->filename, "rb" );
 	if (!input_file)
 	{
-		fprintf( stderr, "Cannot open %s r/o\n", file );
+		fprintf( stderr, "Cannot open %s r/o\n", conf->filename );
 		return;
 	}
 
@@ -1430,7 +1434,7 @@ void ShowJpeg( const char *file )
 					}
 				}
 
-				RGB8toFBPng( fbRow, buffer[0], cinfo.output_width, 0, NULL );
+				RGB8toFBPng( conf, fbRow, buffer[0], cinfo.output_width, 0, NULL );
 				WriteFB( fb, fbRow, BytesPerFBPixel() * x_size );
 				dispRow++;
 				if (g_dbg && dispRow <= 10)
@@ -1464,13 +1468,13 @@ void ShowJpeg( const char *file )
 #endif
 
 // Display bmp to frame buffer. No resizing - must be the right size
-int ShowBmp( const char *inputFile )
+int ShowBmp(struct imgtool_conf *conf)
 {
 	// Open input file
-	int hInput = open( inputFile, O_RDONLY );
+	int hInput = open( conf->filename, O_RDONLY );
 	if (hInput == -1)
 	{
-		fprintf( stderr, "Error: cannot open %s for input; errno=%d (%s)\n", inputFile, errno, strerror(errno) );
+		fprintf( stderr, "Error: cannot open %s for input; errno=%d (%s)\n", conf->filename, errno, strerror(errno) );
 		return -1;
 	}
 	int ret = -1;
@@ -1487,24 +1491,24 @@ int ShowBmp( const char *inputFile )
 	BMPHeader_t bh;
 	if (read( hInput, &bh, sizeof(bh) ) != sizeof(bh))
 	{
-		fprintf( stderr, "Error: cannot read %d bytes from %s for bmp header\n", sizeof(bh), inputFile );
+		fprintf( stderr, "Error: cannot read %d bytes from %s for bmp header\n", sizeof(bh), conf->filename );
 		goto exit_close_input;
 	}
 	if (!bh.fileHeader.IsBMP())
 	{
-		fprintf( stderr, "Error: %s lacks required BM signature - not a bmp file\n", inputFile );
+		fprintf( stderr, "Error: %s lacks required BM signature - not a bmp file\n", conf->filename );
 		goto exit_close_input;
 	}
 	if (bh.infoHeader.GetPlanes() != 1)
 	{
-		fprintf( stderr, "Error: %s has %d planes, only 1 plane supported\n", inputFile, bh.infoHeader.GetPlanes() );
+		fprintf( stderr, "Error: %s has %d planes, only 1 plane supported\n", conf->filename, bh.infoHeader.GetPlanes() );
 		goto exit_close_input;
 	}
 	bpp = bh.infoHeader.GetBitsPerPixel();
 	bmp_width = bh.infoHeader.GetImageWidth();
 	bmp_height = bh.infoHeader.GetImageHeight();
 	bmp_compression = bh.infoHeader.GetCompressionType();
-	fprintf( stderr, "Opened %s for input, %dX%d %dbpp\n", inputFile, bmp_width, bmp_height, bpp );
+	fprintf( stderr, "Opened %s for input, %dX%d %dbpp\n", conf->filename, bmp_width, bmp_height, bpp );
 	if (bmp_compression != 0)
 	{
 		if (bmp_compression == 3)
@@ -1535,7 +1539,7 @@ int ShowBmp( const char *inputFile )
 	if (lseek( hInput, bh.fileHeader.GetImageDataOffset(), SEEK_SET ) == -1L)
 	{
 		fprintf( stderr, "Error: seek to image data offset %ld on input file %s failed, errno=%d (%s)\n",
-			bh.fileHeader.GetImageDataOffset(), inputFile, errno, strerror(errno) );
+			bh.fileHeader.GetImageDataOffset(), conf->filename, errno, strerror(errno) );
 		goto exit_close_input;
 	}
 
@@ -1569,7 +1573,7 @@ int ShowBmp( const char *inputFile )
 	}
 
 	// Write bmp header if requested
-	if (g_bmpMode)
+	if (conf->bmp_mode)
 	{
 		// Fix up bits per pixel, size of image, and file size
 		bh.infoHeader.SetBitsPerPixel( 8 * BytesPerFBPixel() );
@@ -1590,7 +1594,7 @@ int ShowBmp( const char *inputFile )
 		// If bmp mode, we're not flipping
 		int yRow = row;
 		int bmpyRow = row;
-		if (!g_bmpMode)
+		if (!conf->bmp_mode)
 		{
 			yRow = y_size - row - 1;
 			bmpyRow = bmp_height - row - 1;
@@ -1602,7 +1606,7 @@ int ShowBmp( const char *inputFile )
 		}
 		else
 		{
-			ARGB8888toFB( output_buff, &input_buff[bmpyRow*bmp_width*bytes_per_pixel], bmp_width );
+			ARGB8888toFB( conf, output_buff, &input_buff[bmpyRow*bmp_width*bytes_per_pixel], bmp_width );
 		}
 		if (WriteFB( hOutput, output_buff, BytesPerFBPixel() * x_size ) != BytesPerFBPixel() * x_size)
 		{
@@ -1624,13 +1628,13 @@ exit_close_input:
 }
 
 // Capture frame buffer to jpeg
-void CaptureJpeg( const char *outputFile )
+void CaptureJpeg(struct imgtool_conf *conf)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
 	FILE * output_file;
 	JDIMENSION num_scanlines;
-	bool usingStdout = (strcmp( outputFile, "-" ) == 0);
+	bool usingStdout = (strcmp( conf->filename, "-" ) == 0);
 	JSAMPARRAY buffer;
 	JDIMENSION buffer_height;
 
@@ -1654,11 +1658,11 @@ void CaptureJpeg( const char *outputFile )
 	}
 	else
 	{
-		output_file = fopen( outputFile, "wb" );
+		output_file = fopen( conf->filename, "wb" );
 	}
 	if (!output_file)
 	{
-		fprintf( stderr, "Error: cannot open %s for output\n", outputFile );
+		fprintf( stderr, "Error: cannot open %s for output\n", conf->filename );
 		return;
 	}
 
@@ -1711,7 +1715,7 @@ void CaptureJpeg( const char *outputFile )
 				continue;
 			}
 			// Convert to RGB888
-			FBtoRGB888( buffer[0], fbRow, cinfo.image_width );
+			FBtoRGB888( conf, buffer[0], fbRow, cinfo.image_width );
 			if (g_dbg && rowCount < 10)
 			{
 				HexDump( rowCount, "r8g8b8", buffer[0], cinfo.image_width*3 );
@@ -1747,9 +1751,9 @@ void CaptureJpeg( const char *outputFile )
 #ifndef NO_PNG
 
 // Capture frame buffer to png (lossless RGB)
-void CapturePng( const char *outputFile )
+void CapturePng(struct imgtool_conf *conf)
 {
-	fprintf( stderr, "CapturePng(%s) not yet implemented\n", outputFile );
+	fprintf( stderr, "CapturePng(%s) not yet implemented\n", conf->filename );
 }
 
 #define	SUPPORTED_EXTENSIONS ".jpg or .bmp"
@@ -1759,7 +1763,7 @@ void CapturePng( const char *outputFile )
 #endif
 
 // Fill frame buffer with rgb value
-int FillRGB( unsigned int rgb )
+int FillRGB(struct imgtool_conf *conf)
 {
 	int ret = -1;
 	int hOutput = -1;
@@ -1797,10 +1801,10 @@ int FillRGB( unsigned int rgb )
 	// Set up input buffer
 	for (col = 0; col < x_size; col++)
 	{
-		((unsigned int*)input_buff)[col] = (rgb<<0);
+		((unsigned int*)input_buff)[col] = (conf->fill_color<<0);
 	}
 	// Convert to frame buffer
-	ARGB8888toFB( output_buff, input_buff, x_size );
+	ARGB8888toFB( conf, output_buff, input_buff, x_size );
 	// Dump in hex for 8 columns
 	//HexDump( 0, "Fill pattern", output_buff, 4 * 8 );
 
@@ -1895,8 +1899,10 @@ int main( int argc, char *argv[] )
 
 	struct imgtool_conf conf;
 
+	bzero(&conf, sizeof(conf));
 	conf.gamma = 2.2;
 	conf.filename = outputFile;
+	conf.fill_color = 0xffffffff;
 
 	// Get default width and height from environment
 	SetDefault( x_size, "SCREEN_X_RES" );
@@ -2013,7 +2019,7 @@ int main( int argc, char *argv[] )
 		}
 		else if (!strncmp( option, "bmpmode", optionLength ) && optarg)
 		{
-			g_bmpMode = atoi( optarg );
+			conf.bmp_mode = atoi( optarg );
 		}
 		else if (!strncmp( option, "fill", optionLength ) && optarg)
 		{
@@ -2021,15 +2027,15 @@ int main( int argc, char *argv[] )
 			int num_elements = sscanf( optarg, "%d,%d,%d,%d", &r, &g, &b, &a );
 			if (num_elements >= 3)
 			{
-				g_fill = (((unsigned int)r) << 16) | (((unsigned int)g) << 8) | (unsigned int)b;
+				conf.fill_color = (((unsigned int)r) << 16) | (((unsigned int)g) << 8) | (unsigned int)b;
 				if (num_elements > 3)
 				{
-					g_fill |= (((unsigned int)a) << 24);
-					fprintf( stderr, "Filling with r,g,b,a %d,%d,%d,%d (0x%08x)\n", r, g, b, a, g_fill );
+					conf.fill_color |= (((unsigned int)a) << 24);
+					fprintf( stderr, "Filling with r,g,b,a %d,%d,%d,%d (0x%08x)\n", r, g, b, a, conf.fill_color );
 				}
 				else
 				{
-					fprintf( stderr, "Filling with r,g,b %d,%d,%d (0x%06x00)\n", r, g, b, g_fill );
+					fprintf( stderr, "Filling with r,g,b %d,%d,%d (0x%06x00)\n", r, g, b, conf.fill_color );
 				}
 			}
 			else
@@ -2043,7 +2049,7 @@ int main( int argc, char *argv[] )
 		}
 		else if (!strncmp( option, "mirrorh", optionLength ))
 		{
-			g_mirrorH = true;
+			conf.mirror_h = 1;
 		}
 		else if (!strncmp( option, "help", optionLength ))
 		{
@@ -2057,13 +2063,13 @@ int main( int argc, char *argv[] )
 		}
 	}
 	// Are we filling?
-	if (g_fill != 0xffffffff)
+	if (conf.fill_color != 0xffffffff)
 	{
 		sprintf( g_fbDev, "/dev/fb%d", fbNum );
-		FillRGB( g_fill );
+		FillRGB( &conf );
 		if (!outputFile[0])
 		{
-			fprintf( stderr, "Filled with 0x%x, no image to load, exiting\n", g_fill );
+			fprintf( stderr, "Filled with 0x%x, no image to load, exiting\n", conf.fill_color );
 			return 0;
 		}
 	}
@@ -2104,7 +2110,7 @@ int main( int argc, char *argv[] )
 		fprintf( stderr, "Capturing to %s from fb%d format %s\n", outputFileDesc, fbNum, outputFmt );
 		if (!strcmp( outputFmt, "jpg" ))
 		{
-			CaptureJpeg( outputFile );
+			CaptureJpeg(&conf);
 		}
 		else if (!strcmp( outputFmt, "png" ))
 		{
@@ -2112,7 +2118,7 @@ int main( int argc, char *argv[] )
 			fprintf( stderr, "--fmt=png not supported (NO_PNG)\n" );
 			return -1;
 #else
-			CapturePng( outputFile );
+			CapturePng(&conf);
 #endif
 		}
 		else
@@ -2146,7 +2152,7 @@ int main( int argc, char *argv[] )
 #else
 		if (!strcasecmp( ext, ".jpg" ))
 		{
-			ShowJpeg( outputFile );
+			ShowJpeg(&conf);
 			return 0;
 		}
 		if (!strcasecmp( ext, ".gif" ))
@@ -2163,7 +2169,7 @@ int main( int argc, char *argv[] )
 #endif
 		if (!strcasecmp( ext, ".bmp" ))
 		{
-			return ShowBmp( outputFile );
+			return ShowBmp(&conf);
 		}
 		fprintf( stderr, "%s files not currently supported\n", ext );
 		return -1;
