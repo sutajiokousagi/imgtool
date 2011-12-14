@@ -54,7 +54,6 @@ extern "C" {
 #endif
 
 // Global flags
-int g_dbg = 0;
 #define RESIZE_ANY	0xfff	 // Mask to check for any resize bits
 #define	RESIZE_STRETCH_X	0x01	// Stretch width to fit
 #define RESIZE_STRETCH_Y	0x02	// Stretch height to fit
@@ -95,6 +94,8 @@ struct imgtool_conf {
 	char output[256];
 	double gamma;
 	enum eBitFormats fmt;
+
+	int debug_level;
 
 	/* Resizing parameters */
 	int x_pct;
@@ -347,7 +348,7 @@ bool AdjustOutputSize( int& width, int& height, struct imgtool_conf *conf )
 	// Seed display vectors. If we wanted non-proportionate scaling we'd use separate scale factors
 	SetDisplayVector( conf->x_pct, g_dispX );
 	SetDisplayVector( conf->y_pct, g_dispY );
-	if (g_dbg)
+	if (conf->debug_level)
 	{
 		if (conf->x_pct!=100) DumpVector( "X vector", g_dispX );
 		if (conf->y_pct!=100) DumpVector( "Y vector", g_dispY );
@@ -1148,7 +1149,7 @@ void ShowPng(struct imgtool_conf *conf)
 			RGB8toFBPng( conf, fbRow, row_pointers[row], width, num_palette, palette );
 			WriteFB( fb, fbRow, BytesPerFBPixel(conf->fmt) * x_size );
 			dispRow++;
-			if (g_dbg && dispRow <= 10)
+			if (conf->debug_level && dispRow <= 10)
 			{
 				HexDump( row, "r8g8b8", row_pointers[row], width*3 );
 				HexDump( row, "r5g6b5", fbRow, width*2 );
@@ -1430,7 +1431,7 @@ void ShowJpeg(struct imgtool_conf *conf)
 				RGB8toFBPng( conf, fbRow, buffer[0], cinfo.output_width, 0, NULL );
 				WriteFB( fb, fbRow, BytesPerFBPixel(conf->fmt) * x_size );
 				dispRow++;
-				if (g_dbg && dispRow <= 10)
+				if (conf->debug_level && dispRow <= 10)
 				{
 					HexDump( row, "r8g8b8", buffer[0], cinfo.output_width*3 );
 					HexDump( row, "r5g6b5", fbRow, cinfo.output_width*2 );
@@ -1709,7 +1710,7 @@ void CaptureJpeg(struct imgtool_conf *conf)
 			}
 			// Convert to RGB888
 			FBtoRGB888( conf, buffer[0], fbRow, cinfo.image_width );
-			if (g_dbg && rowCount < 10)
+			if (conf->debug_level && rowCount < 10)
 			{
 				HexDump( rowCount, "r8g8b8", buffer[0], cinfo.image_width*3 );
 				HexDump( rowCount, "fb", fbRow, cinfo.image_width*BytesPerFBPixel(conf->fmt) );
@@ -1920,7 +1921,7 @@ int main( int argc, char *argv[] )
 		}
 		if (!strncmp( option, "debug", optionLength ))
 		{
-			g_dbg++;
+			conf.debug_level++;
 		}
 		else if (!strncmp( option, "resize", optionLength ))
 		{
