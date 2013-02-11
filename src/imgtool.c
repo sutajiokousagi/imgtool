@@ -2091,7 +2091,8 @@ main( int argc, char *argv[] )
 	fill_fb_defaults(&conf);
 
 
-	fprintf( stderr, "%s " VER_FMT " (built for " CNPLATFORM ")\n", argv[0], VER_DATA );
+	// below is just informational and makes it much harder to compile
+	//	fprintf( stderr, "%s " VER_FMT " (built for " CNPLATFORM ")\n", argv[0], VER_DATA );
 
 	error_message = parse_args(&conf, argc, argv);
 
